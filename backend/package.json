@@ -9,7 +9,9 @@
     "test": "jest --coverage",
     "test:watch": "jest --watch",
     "db:setup": "node database/setup.js",
-    "db:migrate": "psql -f database/schema.sql"
+    "db:migrate": "psql -f database/schema.sql",
+    "db:migrate:sessions": "node database/migration-session-management.js",
+    "test:sessions": "node test-session-management.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.0",

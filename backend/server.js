@@ -6,7 +6,10 @@ const dotenv = require('dotenv');
 
 
 
-const chatRoutes = require('./routes/chat');
+const chatRoutesV2 = require('./routes/chatV2');
+const chatRoutesV1 = require('./routes/chat');
+
+const { startCleanupScheduler, stopCleanupScheduler } = require('./services/sessionManager');
 const { rateLimiter } = require('./middleware/rateLimiter');
 const { errorHandler } = require('./middleware/errorHandler');
 
@@ -53,7 +56,7 @@ app.get('/health', (req, res) => {
 });
 
 // API routes
-app.use('/api/chat', chatRoutes);
+app.use('/api/chat', chatRoutesV2);
 
 // 404 handler
 app.use((req, res) => {
@@ -62,10 +65,15 @@ app.use((req, res) => {
     message: 'The requested resource does not exist.'
   });
 });
+startCleanupScheduler();
 
 // Global error handler
 app.use(errorHandler);
-
+process.on('SIGTERM', () => {
+  console.log('⏹️  Shutting down gracefully...');
+  stopCleanupScheduler();
+  process.exit(0);
+});
 // Start server
 app.listen(PORT, () => {
   console.log(`╔════════════════════════════════════════════════════════════╗`);
