@@ -6,7 +6,6 @@ const {
   getConversationWithExpirationCheck,
 } = require('../services/sessionManager');
 const { getConversation, saveConversation, logMessage, logAnalytics, generateSessionId } = require('../services/conversationService');
-const { searchFAQ, getRecommendation, findBranches } = require('../services/policyService');
 const {
   buildChatResponse,
   buildSessionExpiredResponse,
@@ -14,7 +13,7 @@ const {
   buildEscalationResponse,
   buildErrorResponse,
 } = require('../utils/responseBuilder');
-
+const { searchFAQ, getRecommendation, findBranches, searchCompanyKnowledge } = require('../services/policyService');
 /**
  * NEW - Enhanced chat handler with session expiration management
  * 
@@ -124,7 +123,14 @@ async function handleChat(req, res) {
         answer: f.answer,
       }));
     }
-
+const companyInfoMatches = await searchCompanyKnowledge(message, 3);
+if (companyInfoMatches.length > 0) {
+  contextData.companyInfo = companyInfoMatches.map(row => ({
+    section: row.section,
+    title: row.title,
+    content: row.content,
+  }));
+}
     const recommendation = await getRecommendation(message);
     if (recommendation.matchedProducts.length > 0) {
       contextData.recommendations = recommendation;
@@ -141,8 +147,7 @@ async function handleChat(req, res) {
     }
 
     // Get AI response
-    const aiResponse = await getClaudeResponse(enrichedMessage, history);
-
+const aiResponse = await getClaudeResponse(enrichedMessage, history, contextData);
     // ===== STEP 6: Save Conversation & Build Response =====
     
     const updatedHistory = [...history, { role: 'user', content: message }];

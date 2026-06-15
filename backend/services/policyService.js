@@ -100,7 +100,33 @@ async function findBranches(city = null) {
     return [];
   }
 }
+async function searchCompanyKnowledge(searchQuery, limit = 3) {
+  try {
+    const keywords = searchQuery.toLowerCase().split(/\W+/).filter(Boolean);
+    if (keywords.length === 0) return [];
 
+    const result = await query(
+      `
+      SELECT *
+      FROM company_knowledge
+      WHERE is_active = true
+        AND (
+          title ILIKE $1
+          OR content ILIKE $1
+          OR tags && $2::text[]
+        )
+      ORDER BY updated_at DESC
+      LIMIT $3
+      `,
+      [`%${keywords.join('%')}%`, keywords, limit]
+    );
+
+    return result.rows;
+  } catch (err) {
+    console.error('Company knowledge search error:', err);
+    return [];
+  }
+}
 /**
  * Get product recommendation based on user needs
  * @param {string} need - User's stated need
@@ -246,5 +272,6 @@ module.exports = {
   getProducts,
   findBranches,
   getRecommendation,
+  searchCompanyKnowledge,
   getQuickFact,
 };

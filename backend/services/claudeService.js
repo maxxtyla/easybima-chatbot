@@ -4,7 +4,41 @@ const { SYSTEM_PROMPT } = require('../prompts/systemPrompt');
 /**
  * Get response from OpenRouter API
  */
-async function getClaudeResponse(userMessage, conversationHistory = []) {
+function buildContextMessage(contextData = {}) {
+  const parts = [];
+
+  if (contextData.companyInfo?.length) {
+    parts.push('Company information from the knowledge database:');
+    contextData.companyInfo.forEach((info, idx) => {
+      parts.push(`${idx + 1}. ${info.title} — ${info.content}`);
+    });
+  }
+  if (contextData.recommendations && contextData.recommendations.matchedProducts) {
+    parts.push('Recommended products from the database:');
+    parts.push(`Category: ${contextData.recommendations.category}`);
+    parts.push(`Description: ${contextData.recommendations.description}`);
+    parts.push('Matched products:');
+    parts.push(contextData.recommendations.matchedProducts.map(p => `- ${p.name || p}`).join('\n'));
+  }
+
+  if (contextData.branches && contextData.branches.length > 0) {
+    parts.push('Branch location information from the database:');
+    contextData.branches.forEach(branch => {
+      parts.push(`- ${branch.name}${branch.city ? ', ' + branch.city : ''}${branch.address ? ' — ' + branch.address : ''}`);
+    });
+  }
+
+  if (parts.length === 0) {
+    return null;
+  }
+
+  return {
+    role: 'system',
+    content: parts.join('\n'),
+  };
+}
+
+async function getClaudeResponse(userMessage, conversationHistory = [], contextData = {}) {
   try {
     const apiKey = process.env.OPENROUTER_API_KEY;
     const model = process.env.OPENROUTER_MODEL || 'meta-llama/llama-2-70b-chat';
@@ -13,8 +47,15 @@ async function getClaudeResponse(userMessage, conversationHistory = []) {
       throw new Error('OPENROUTER_API_KEY not set in environment variables');
     }
 
+    const contextMessage = buildContextMessage(contextData);
+
     // Build messages array
     const messages = [
+      {
+        role: 'system',
+        content: SYSTEM_PROMPT,
+      },
+      ...(contextMessage ? [contextMessage] : []),
       ...conversationHistory.map(msg => ({
         role: msg.role,
         content: msg.content,
@@ -34,13 +75,7 @@ async function getClaudeResponse(userMessage, conversationHistory = []) {
       },
       body: JSON.stringify({
         model: model,
-        messages: [
-          {
-            role: 'system',
-            content: SYSTEM_PROMPT,
-          },
-          ...messages,
-        ],
+        messages,
         temperature: parseFloat(process.env.CLAUDE_TEMPERATURE) || 0.7,
         max_tokens: parseInt(process.env.CLAUDE_MAX_TOKENS) || 1024,
       }),

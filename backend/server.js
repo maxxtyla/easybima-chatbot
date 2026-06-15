@@ -7,7 +7,6 @@ const dotenv = require('dotenv');
 
 
 const chatRoutesV2 = require('./routes/chatV2');
-const chatRoutesV1 = require('./routes/chat');
 
 const { startCleanupScheduler, stopCleanupScheduler } = require('./services/sessionManager');
 const { rateLimiter } = require('./middleware/rateLimiter');
