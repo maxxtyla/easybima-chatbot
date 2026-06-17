@@ -116,21 +116,29 @@ async function handleChat(req, res) {
     let enrichedMessage = message;
     const contextData = {};
 
-    const faqMatches = await searchFAQ(message, 2);
+    const faqMatches = await searchFAQ(message, 3);
     if (faqMatches.length > 0) {
       contextData.faqContext = faqMatches.map(f => ({
+        id: f.id,
+        category: f.category,
         question: f.question,
         answer: f.answer,
+        keywords: f.keywords,
+        source_url: f.source_url,
       }));
     }
-const companyInfoMatches = await searchCompanyKnowledge(message, 3);
-if (companyInfoMatches.length > 0) {
-  contextData.companyInfo = companyInfoMatches.map(row => ({
-    section: row.section,
-    title: row.title,
-    content: row.content,
-  }));
-}
+
+    const companyInfoMatches = await searchCompanyKnowledge(message, 3);
+    if (companyInfoMatches.length > 0) {
+      contextData.companyInfo = companyInfoMatches.map(row => ({
+        id: row.id,
+        section: row.section,
+        title: row.title,
+        content: row.content,
+        tags: row.tags,
+        source_url: row.source_url,
+      }));
+    }
     const recommendation = await getRecommendation(message);
     if (recommendation.matchedProducts.length > 0) {
       contextData.recommendations = recommendation;
@@ -142,7 +150,15 @@ if (companyInfoMatches.length > 0) {
       const city = cityMatch ? cityMatch[1] : null;
       const branches = await findBranches(city);
       if (branches.length > 0) {
-        contextData.branches = branches.slice(0, 3);
+        contextData.branches = branches.slice(0, 3).map(b => ({
+          id: b.id,
+          name: b.name,
+          phone: b.phone,
+          address: b.address,
+          region: b.region,
+          city: b.city,
+          source_url: b.source_url,
+        }));
       }
     }
 

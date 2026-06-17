@@ -1,0 +1,109 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  @apply m-0 p-0 box-border;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-cic-light text-cic-gray font-sans;
+  font-family: 'Inter', sans-serif;
+}
+
+/* Scrollbar Styles */
+::-webkit-scrollbar {
+  @apply w-2;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-gray-300 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-gray-400;
+}
+
+/* Chat Widget Styles */
+.chat-message {
+  @apply animate-slide-up;
+}
+
+.chat-bubble {
+  @apply rounded-bubble shadow-chat-bubble;
+}
+
+.typing-indicator {
+  @apply flex gap-1;
+}
+
+.typing-indicator span {
+  @apply h-2 w-2 bg-gray-400 rounded-full animate-pulse-dot;
+}
+
+.typing-indicator span:nth-child(1) {
+  animation-delay: 0ms;
+}
+
+.typing-indicator span:nth-child(2) {
+  animation-delay: 150ms;
+}
+
+.typing-indicator span:nth-child(3) {
+  animation-delay: 300ms;
+}
+
+/* Input Focus Styles */
+input:focus {
+  @apply outline-none ring-2 ring-cic-red ring-offset-0;
+}
+
+/* Button Styles */
+button {
+  @apply transition-colors duration-200;
+}
+
+button:focus-visible {
+  @apply outline-none ring-2 ring-offset-2 ring-cic-red;
+}
+
+/* Custom Animations */
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideOut {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
+.slide-in {
+  animation: slideIn 0.3s ease-out;
+}
+
+.slide-out {
+  animation: slideOut 0.3s ease-out;
+}

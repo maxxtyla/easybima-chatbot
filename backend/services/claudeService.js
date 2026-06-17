@@ -6,11 +6,13 @@ const { SYSTEM_PROMPT } = require('../prompts/systemPrompt');
  */
 function buildContextMessage(contextData = {}) {
   const parts = [];
+  parts.push('IMPORTANT: The assistant must ONLY use the information provided below from the database. Do NOT invent facts. For any fact include its source URL in parentheses when used.');
 
   if (contextData.companyInfo?.length) {
-    parts.push('Company information from the knowledge database:');
+    parts.push('\nCompany information from the knowledge database:');
     contextData.companyInfo.forEach((info, idx) => {
-      parts.push(`${idx + 1}. ${info.title} — ${info.content}`);
+      const src = info.source_url ? ` (source: ${info.source_url})` : '';
+      parts.push(`${idx + 1}. ${info.title} — ${info.content}${src}`);
     });
   }
   if (contextData.recommendations && contextData.recommendations.matchedProducts) {
@@ -18,13 +20,14 @@ function buildContextMessage(contextData = {}) {
     parts.push(`Category: ${contextData.recommendations.category}`);
     parts.push(`Description: ${contextData.recommendations.description}`);
     parts.push('Matched products:');
-    parts.push(contextData.recommendations.matchedProducts.map(p => `- ${p.name || p}`).join('\n'));
+    parts.push(contextData.recommendations.matchedProducts.map(p => `- ${p.name || p.category || p.sub_category}${p.source_url ? ` (source: ${p.source_url})` : ''}`).join('\n'));
   }
 
   if (contextData.branches && contextData.branches.length > 0) {
     parts.push('Branch location information from the database:');
     contextData.branches.forEach(branch => {
-      parts.push(`- ${branch.name}${branch.city ? ', ' + branch.city : ''}${branch.address ? ' — ' + branch.address : ''}`);
+      const src = branch.source_url ? ` (source: ${branch.source_url})` : '';
+      parts.push(`- ${branch.name}${branch.city ? ', ' + branch.city : ''}${branch.address ? ' — ' + branch.address : ''}${src}`);
     });
   }
 
@@ -54,6 +57,11 @@ async function getClaudeResponse(userMessage, conversationHistory = [], contextD
       {
         role: 'system',
         content: SYSTEM_PROMPT,
+      },
+      // Add an extra system-level instruction to ensure DB-only sourcing
+      {
+        role: 'system',
+        content: 'When answering use ONLY the facts and entries supplied in the context. Cite source URLs for any fact you present. If the answer is not present in the database, say you do not have that information and offer next steps (ask clarifying Qs or escalate). Do not hallucinate.'
       },
       ...(contextMessage ? [contextMessage] : []),
       ...conversationHistory.map(msg => ({
