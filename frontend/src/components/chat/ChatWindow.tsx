@@ -32,7 +32,7 @@ const QUICK_QUESTIONS: QuickQuestion[] = [
  
   {
     id: '6',
-    text: 'Tell me about your CIC insurance Group.',
+    text: 'Tell me about  CIC insurance Group.',
   },
 ]
 

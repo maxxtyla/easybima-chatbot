@@ -13,6 +13,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   const isUser = message.role === 'user'
 
   return (
+    
     <div
       className={cn(
         'flex chat-message',
@@ -51,5 +52,8 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         </span>
       </div>
     </div>
+
+
+
   )
 }

@@ -107,3 +107,26 @@ button:focus-visible {
 .slide-out {
   animation: slideOut 0.3s ease-out;
 }
+.chat-message,
+.ai-message,
+.user-message {
+  max-width: 100%;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  word-break: break-word;
+  white-space: pre-wrap;
+  box-sizing: border-box;
+}
+.message-content {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+.message-content p {
+    margin: 0 0 8px 0;
+    line-height: 1.5;
+}
+
+.message-content p:last-child {
+    margin-bottom: 0;
+}

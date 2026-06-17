@@ -2,7 +2,7 @@ const { pool } = require('../config/database');
 
 // ─── Configuration ───────────────────────────────────────────────────────────
 const SESSION_CONFIG = {
-  TIMEOUT_MS:          30 * 60 * 1000,  // 30 minutes (was 8 — too short)
+  TIMEOUT_MS:          8 * 60 * 1000,  // 8 minutes 
   WARNING_THRESHOLD_MS: 5 * 60 * 1000,  // Warn at 5 minutes remaining
   CLEANUP_INTERVAL_MS: 60 * 1000,       // Sweep every 60 seconds
 };
