@@ -5,50 +5,51 @@ const validateInput = (req, res, next) => {
 
   // Validate message
   if (!message || typeof message !== 'string') {
-    return res.status(400).json({ 
+    return res.status(400).json({
       error: 'Message is required',
-      code: 'MISSING_MESSAGE'
+      code: 'MISSING_MESSAGE',
     });
   }
 
   if (message.trim().length === 0) {
-    return res.status(400).json({ 
+    return res.status(400).json({
       error: 'Message cannot be empty',
-      code: 'EMPTY_MESSAGE'
+      code: 'EMPTY_MESSAGE',
     });
   }
 
   if (message.length > 2000) {
-    return res.status(400).json({ 
+    return res.status(400).json({
       error: 'Message too long (max 2000 characters)',
-      code: 'MESSAGE_TOO_LONG'
+      code: 'MESSAGE_TOO_LONG',
     });
   }
 
-  // Sanitize message - remove HTML tags
-  const sanitizedMessage = validator.escape(message.trim());
+  // Fix: use trim() only — do NOT use validator.escape() here.
+  // validator.escape() converts apostrophes/quotes to HTML entities (&#x27; etc.)
+  // which corrupts the plain-text prompt sent to the AI model.
+  const sanitizedMessage = message.trim();
 
-  // Validate session ID if provided
-  let validatedSessionId = sessionId;
-  if (sessionId && !validator.isUUID(sessionId)) {
-    // If not a valid UUID, we'll generate a new one in the controller
-    validatedSessionId = null;
-  }
-
-  // Check for potential injection patterns
+  // Block actual script injection patterns before passing to AI
   const suspiciousPatterns = [
-    /<script[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
+    /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
     /javascript:/gi,
     /on\w+\s*=/gi,
   ];
 
   for (const pattern of suspiciousPatterns) {
-    if (pattern.test(message)) {
+    if (pattern.test(sanitizedMessage)) {
       return res.status(400).json({
         error: 'Potentially malicious input detected',
-        code: 'SUSPICIOUS_INPUT'
+        code: 'SUSPICIOUS_INPUT',
       });
     }
+  }
+
+  // Validate session ID if provided
+  let validatedSessionId = sessionId;
+  if (sessionId && !validator.isUUID(sessionId)) {
+    validatedSessionId = null;
   }
 
   // Attach sanitized data to request

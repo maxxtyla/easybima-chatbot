@@ -2,15 +2,8 @@ require('dotenv').config();
 const { Pool } = require('pg');
 
 // Validate required environment variables
-const requiredEnvVars = [
-  'DB_HOST',
-  'DB_USER',
-  'DB_NAME',
-];
-
-const missingEnvVars = requiredEnvVars.filter(
-  envVar => !process.env[envVar]
-);
+const requiredEnvVars = ['DB_HOST', 'DB_USER', 'DB_NAME'];
+const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
 
 if (missingEnvVars.length > 0) {
   throw new Error(
@@ -31,10 +24,8 @@ const pool = new Pool({
   connectionTimeoutMillis: 2000,
 });
 
-module.exports = { pool };
-
 // Handle pool errors
-pool.on('error', (err, client) => {
+pool.on('error', (err) => {
   console.error('Unexpected error on idle client', err);
 });
 
@@ -82,6 +73,7 @@ const transaction = async (callback) => {
   }
 };
 
+// Fix: single export - removed the duplicate mid-file `module.exports = { pool }`
 module.exports = {
   pool,
   query,

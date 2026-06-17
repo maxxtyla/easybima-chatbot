@@ -1,50 +1,43 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'
+// Fix: append /api to the base URL so all requests route correctly.
+// NEXT_PUBLIC_API_URL should be set to http://localhost:3001 (no trailing slash, no /api).
+const API_BASE = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/api`;
 
-export async function sendMessage(
-  sessionId: string,
-  message: string
-): Promise<{ message: string; sessionId: string }> {
-  try {
-    // Backend expects POST /api/chat with body { message, sessionId }
-    const response = await fetch(`${API_URL}/api/chat`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        sessionId,
-        message,
-      }),
-    })
+export async function sendMessage(sessionId: string, message: string) {
+  const response = await fetch(`${API_BASE}/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId, message }),
+  });
 
-    if (!response.ok) {
-      const text = await response.text()
-      throw new Error(`API error: ${response.status} ${text}`)
-    }
-
-    const data = await response.json()
-
-    // Backend response shape: { response: string, sessionId, ... }
-    return { message: data.response, sessionId: data.sessionId }
-  } catch (error) {
-    console.error('Error sending message:', error)
-    throw error
+  if (!response.ok) {
+    const error = new Error('Failed to send message') as any;
+    error.status = response.status;
+    throw error;
   }
+
+  return response.json();
 }
 
-export async function checkHealth(): Promise<{ status: string }> {
-  try {
-    const response = await fetch(`${API_URL}/health`, {
-      method: 'GET',
-    })
+export async function keepAliveSession(sessionId: string) {
+  const response = await fetch(`${API_BASE}/chat/keep-alive`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId }),
+  });
 
-    if (!response.ok) {
-      throw new Error(`Health check failed: ${response.status}`)
-    }
+  if (!response.ok) throw new Error('Keep-alive failed');
+  return response.json();
+}
 
-    return await response.json()
-  } catch (error) {
-    console.error('Health check error:', error)
-    throw error
+export async function getConversationHistory(sessionId: string) {
+  const response = await fetch(`${API_BASE}/chat/conversation/${sessionId}`);
+
+  if (response.status === 410) {
+    const error = new Error('Session expired') as any;
+    error.status = 410;
+    throw error;
   }
+
+  if (!response.ok) throw new Error('Failed to fetch history');
+  return response.json();
 }

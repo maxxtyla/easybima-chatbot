@@ -1,109 +1,74 @@
-/**
- * Response builders with session expiration messaging
- * 
- * Handles consistent formatting of warnings and session state
- */
-
-/**
- * Build chat response with optional session expiration warning
- */
-function buildChatResponse(data) {
-  const {
+function buildChatResponse({ response, sessionId, sessionStatus }) {
+  const result = {
     response,
     sessionId,
-    timestamp = new Date().toISOString(),
-    sessionStatus = {},
-  } = data;
-
-  const baseResponse = {
-    response,
-    sessionId,
-    timestamp,
+    timestamp: new Date().toISOString(),
     session: {
-      isActive: sessionStatus.isActive !== false,
+      isActive: sessionStatus.isActive,
       timeRemainingSeconds: Math.ceil(sessionStatus.timeRemainingMs / 1000),
     },
   };
 
-  // Add warning if expiration is imminent
-  if (sessionStatus.warningNeeded) {
-    baseResponse.warning = {
+  // Add warning if session is expiring soon (< 2 minutes)
+  if (sessionStatus.timeRemainingMs < 120000 && sessionStatus.timeRemainingMs > 0) {
+    result.warning = {
       type: 'session_expiring_soon',
-      message: `Your conversation will close in ${Math.ceil(sessionStatus.timeRemainingMs / 1000)} seconds due to inactivity.`,
+      message: 'Your session will expire soon due to inactivity.',
       timeRemainingSeconds: Math.ceil(sessionStatus.timeRemainingMs / 1000),
-      action: 'Send a message to reset the timer',
+      action: 'Send a message or click keep-alive to continue',
     };
   }
 
-  return baseResponse;
+  return result;
 }
 
-/**
- * Build response for expired sessions
- */
 function buildSessionExpiredResponse(sessionId) {
   return {
-    error: 'session_expired',
-    message: 'Your conversation has expired due to inactivity. A new session will be started.',
-    sessionId: null, // Client should request new session
-    newSessionId: null, // To be generated on next message
+    response: "Your session has expired due to inactivity. I've started a fresh conversation — how can I help you?",
+    sessionId,
     timestamp: new Date().toISOString(),
-    reason: 'inactivity',
-    suggestedAction: 'Send your message to start a new conversation',
+    session: {
+      isActive: false,
+      timeRemainingSeconds: 0,
+    },
+    sessionExpired: true,
   };
 }
 
-/**
- * Build response for new sessions
- */
 function buildNewSessionResponse(sessionId) {
   return {
-    isNewSession: true,
+    response: "Welcome! I'm Bima, your CIC Insurance assistant. How can I help you today?",
     sessionId,
-    message: 'Starting a new conversation',
     timestamp: new Date().toISOString(),
+    session: {
+      isActive: true,
+      timeRemainingSeconds: 1800,
+    },
+    isNewSession: true,
   };
 }
 
-/**
- * Escalate to human agent response
- */
 function buildEscalationResponse() {
   return {
-    response: `I've escalated your request to our customer support team. They will assist you shortly.
-
-📞 In the meantime, you can also:
-• Call our customer care: +254 XX XXX XXXX
-• Visit our website: www.cicgroup.com
-• Find a nearby branch
-
-Your reference ID: ${generateReferenceId()}`,
+    response:
+      "I understand you need extra assistance. Let me connect you with one of our specialists.\n\n" +
+      "📞 **Call us:** +254 20 2823000\n" +
+      "📧 **Email:** info@cicinsurancegroup.com\n" +
+      "🌐 **Website:** https://www.cicinsurancegroup.com\n\n" +
+      "Our team is available Monday–Friday, 8:00 AM – 5:00 PM EAT. Is there anything else I can help with in the meantime?",
     timestamp: new Date().toISOString(),
   };
 }
 
-/**
- * Error response builder
- */
 function buildErrorResponse(error, sessionId) {
-  console.error('Chat error:', error);
-
+  const isDev = process.env.NODE_ENV !== 'production';
   return {
-    error: 'chat_error',
-    message: 'An error occurred while processing your message. Please try again.',
-    sessionId,
+    error: 'internal_server_error',
+    message: 'Something went wrong. Please try again.',
+    sessionId: sessionId || null,
     timestamp: new Date().toISOString(),
-    details: process.env.NODE_ENV === 'development' ? error.message : undefined,
+    ...(isDev && { debug: error?.message }),
   };
-}
-
-/**
- * Generate unique reference ID for escalations
- */
-function generateReferenceId() {
-  const timestamp = Date.now().toString(36).toUpperCase();
-  const random = Math.random().toString(36).substring(2, 7).toUpperCase();
-  return `${timestamp}${random}`;
 }
 
 module.exports = {
@@ -112,5 +77,4 @@ module.exports = {
   buildNewSessionResponse,
   buildEscalationResponse,
   buildErrorResponse,
-  generateReferenceId,
 };
