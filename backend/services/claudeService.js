@@ -15,6 +15,13 @@ function buildContextMessage(contextData = {}) {
       parts.push(`${idx + 1}. ${info.title} — ${info.content}${src}`);
     });
   }
+  if (contextData.faqContext?.length) {
+  parts.push('\nFrequently asked questions from the knowledge base:');
+  contextData.faqContext.forEach((f, idx) => {
+    const src = f.source_url ? ` (source: ${f.source_url})` : '';
+    parts.push(`${idx + 1}. Q: ${f.question}\n   A: ${f.answer}${src}`);
+  });
+}
   if (contextData.recommendations && contextData.recommendations.matchedProducts) {
     parts.push('Recommended products from the database:');
     parts.push(`Category: ${contextData.recommendations.category}`);
@@ -41,79 +48,156 @@ function buildContextMessage(contextData = {}) {
   };
 }
 
-async function getClaudeResponse(userMessage, conversationHistory = [], contextData = {}) {
+async function getClaudeResponse(
+  userMessage,
+  conversationHistory = [],
+  contextData = {}
+) {
   try {
     const apiKey = process.env.OPENROUTER_API_KEY;
-    const model = process.env.OPENROUTER_MODEL || 'meta-llama/llama-2-70b-chat';
+    const model =
+      process.env.OPENROUTER_MODEL ||
+      'anthropic/claude-3.5-sonnet';
 
     if (!apiKey) {
-      throw new Error('OPENROUTER_API_KEY not set in environment variables');
+      throw new Error(
+        'OPENROUTER_API_KEY not set in environment variables'
+      );
     }
 
     const contextMessage = buildContextMessage(contextData);
 
-    // Build messages array
     const messages = [
       {
         role: 'system',
         content: SYSTEM_PROMPT,
       },
-      // Add an extra system-level instruction to ensure DB-only sourcing
       {
         role: 'system',
-        content: 'When answering use ONLY the facts and entries supplied in the context. Cite source URLs for any fact you present. If the answer is not present in the database, say you do not have that information and offer next steps (ask clarifying Qs or escalate). Do not hallucinate.'
+        content:
+          'When answering use ONLY the facts and entries supplied in the context. Cite source URLs for any fact you present. If the answer is not present in the database, say you do not have that information and offer next steps. Do not hallucinate.',
       },
       ...(contextMessage ? [contextMessage] : []),
       ...conversationHistory.map(msg => ({
         role: msg.role,
         content: msg.content,
       })),
-      { role: 'user', content: userMessage },
+      {
+        role: 'user',
+        content: userMessage,
+      },
     ];
 
-    console.log(`🤖 Calling OpenRouter API with ${messages.length} messages...`);
+    console.log(
+      `🤖 Calling OpenRouter API with ${messages.length} messages`
+    );
 
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-        'HTTP-Referer': 'http://localhost:3001',
-        'X-Title': 'EasyBima Chatbot',
-      },
-      body: JSON.stringify({
-        model: model,
-        messages,
-        temperature: parseFloat(process.env.CLAUDE_TEMPERATURE) || 0.7,
-        max_tokens: parseInt(process.env.CLAUDE_MAX_TOKENS) || 1024,
-      }),
-    });
+    const response = await fetch(
+      'https://openrouter.ai/api/v1/chat/completions',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'http://localhost:3001',
+          'X-Title': 'EasyBima Chatbot',
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          temperature:
+            parseFloat(process.env.CLAUDE_TEMPERATURE) || 0.2,
+          max_tokens:
+            parseInt(process.env.CLAUDE_MAX_TOKENS) || 1024,
+        }),
+      }
+    );
 
     const data = await response.json();
 
-    // Check for errors
+    console.log(
+      '📦 OpenRouter response:',
+      JSON.stringify(data, null, 2)
+    );
+
     if (!response.ok) {
-      console.error('❌ OpenRouter API Error:', data);
+      console.error('❌ OpenRouter Error:', data);
+
       throw new Error(
-        data.error?.message || 
-        `API Error: ${response.status} ${response.statusText}`
+        data?.error?.message ||
+          `OpenRouter API Error ${response.status}`
       );
     }
 
-    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
-      throw new Error('Invalid response from OpenRouter API');
+    if (!data?.choices?.length) {
+      throw new Error(
+        `No choices returned from OpenRouter: ${JSON.stringify(
+          data
+        )}`
+      );
     }
 
-    const aiResponse = data.choices[0].message.content;
-    console.log(`✅ OpenRouter response received (${aiResponse.length} chars)`);
+    const choice = data.choices[0];
+
+    let aiResponse = null;
+
+    // Standard OpenAI/OpenRouter format
+    if (
+      typeof choice?.message?.content === 'string'
+    ) {
+      aiResponse = choice.message.content;
+    }
+
+    // Claude/OpenRouter content array format
+    else if (
+      Array.isArray(choice?.message?.content)
+    ) {
+      aiResponse = choice.message.content
+        .filter(item => item.type === 'text')
+        .map(item => item.text)
+        .join('\n');
+    }
+
+    // Alternative content field
+    else if (
+      Array.isArray(data?.content)
+    ) {
+      aiResponse = data.content
+        .filter(item => item.type === 'text')
+        .map(item => item.text)
+        .join('\n');
+    }
+
+    if (
+      !aiResponse ||
+      typeof aiResponse !== 'string'
+    ) {
+      console.error(
+        '❌ Unable to extract text response:',
+        JSON.stringify(data, null, 2)
+      );
+
+      throw new Error(
+        'OpenRouter returned no text content'
+      );
+    }
+
+    aiResponse = aiResponse.trim();
+
+    console.log(
+      `✅ OpenRouter response received (${aiResponse.length} chars)`
+    );
 
     return aiResponse;
   } catch (error) {
-    console.error('❌ OpenRouter API Error:', error.message);
+    console.error(
+      '❌ OpenRouter API Error:',
+      error.message
+    );
+
     throw error;
   }
 }
-
 /**
  * Check if message contains escalation triggers
  */

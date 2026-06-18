@@ -124,7 +124,7 @@ button:focus-visible {
 }
 .message-content p {
     margin: 0 0 8px 0;
-    line-height: 1.5;
+    line-height: 0.4;
 }
 
 .message-content p:last-child {

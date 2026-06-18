@@ -15,6 +15,7 @@ const {
   buildErrorResponse,
 } = require('../utils/responseBuilder');
 const { searchFAQ, getRecommendation, findBranches, searchCompanyKnowledge } = require('../services/policyService');
+const { rankResults } = require('../utils/rankResults');
 
 async function handleChat(req, res) {
   const startTime = Date.now();
@@ -149,6 +150,29 @@ async function handleChat(req, res) {
         }));
       }
     }
+
+const hasContext =
+  (contextData.faqContext?.length > 0) ||
+  (contextData.companyInfo?.length > 0) ||
+  (contextData.recommendations?.matchedProducts?.length > 0) ||
+  (contextData.branches?.length > 0);
+
+if (!hasContext) {
+  contextData._noResults = true;
+}
+// After your parallel searches:
+const rankedFAQs = rankResults(faqMatches, message).slice(0, 3);
+const rankedCompany = rankResults(companyInfoMatches, message).slice(0, 3);
+
+if (rankedFAQs.length > 0) {
+  contextData.faqContext = rankedFAQs;
+}
+
+if (rankedCompany.length > 0) {
+  contextData.companyInfo = rankedCompany;
+}
+
+
 
     const aiResponse = await getClaudeResponse(message, history, contextData);
 

@@ -76,12 +76,10 @@ process.on('SIGTERM', () => {
 // Start server
 app.listen(PORT, () => {
   console.log(`╔════════════════════════════════════════════════════════════╗`);
-  console.log(`║           EasyBima AI Chatbot Backend                      ║`);
+  console.log(`║           Bima AI Chatbot Backend                          ║`);
   console.log(`║           CIC Insurance Group - Kenya                      ║`);
   console.log(`╠════════════════════════════════════════════════════════════╣`);
-  console.log(`║  Server running on port: ${PORT}                           ║`);
-  console.log(`║  Environment: ${process.env.NODE_ENV || 'development'}     ║`);
-  console.log(`║  Health check: http://localhost:${PORT}/health             ║`);
+  console.log(`║           Server running on port: ${PORT}                           ║`);
   console.log(`╚════════════════════════════════════════════════════════════╝`);
 });
 

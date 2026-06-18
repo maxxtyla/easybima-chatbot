@@ -1,31 +1,70 @@
 const { query } = require('../config/database');
 
-/**
- * Search FAQ entries by keywords
- */
-async function searchFAQ(searchQuery, limit = 3) {
+// ---------------------------------------------------------------------------
+// Helper — builds individual ILIKE conditions from a keyword array so that
+// each word is matched independently instead of being joined into one broken
+// pattern like "%what%insurance%products%you%offer%".
+//
+// Returns: { conditions: string, params: any[], nextIndex: number }
+// ---------------------------------------------------------------------------
+function buildIlikeConditions(keywords, columns, startIndex = 1) {
+  // One $N per keyword, reused across all columns via the same param index
+  const conditions = keywords
+    .map((_, i) => {
+      const paramIdx = startIndex + i;
+      return `(${columns.map(col => `${col} ILIKE $${paramIdx}`).join(' OR ')})`;
+    })
+    .join(' OR ');
+
+  const params = keywords.map(k => `%${k}%`);
+  return { conditions, params, nextIndex: startIndex + keywords.length };
+}
+
+// ---------------------------------------------------------------------------
+// Helper — wraps a plain JS array into the Postgres literal "{a,b,c}" that
+// the pg driver accepts for text[] parameters without needing casting tricks.
+// ---------------------------------------------------------------------------
+function toPgArray(arr) {
+  if (!arr || arr.length === 0) return '{}';
+  const escaped = arr.map(v => `"${String(v).replace(/"/g, '\\"')}"`);
+  return `{${escaped.join(',')}}`;
+}
+
+// ---------------------------------------------------------------------------
+// searchFAQ
+// ---------------------------------------------------------------------------
+async function searchFAQ(searchQuery, limit = 5) {
   try {
-    const keywords = searchQuery.toLowerCase().split(/\W+/).filter(w => w.length > 2);
+    const keywords = searchQuery
+      .toLowerCase()
+      .split(/\W+/)
+      .filter(w => w.length > 2);
+
     if (keywords.length === 0) return [];
 
-    const result = await query(
-      `
+    // Build per-keyword ILIKE conditions for question + answer columns
+    const { conditions, params, nextIndex } = buildIlikeConditions(
+      keywords,
+      ['question', 'answer'],
+      1
+    );
+
+    // $nextIndex = pg array for keyword-array overlap check
+    // $nextIndex+1 = limit
+    const sql = `
       SELECT id, category, question, answer, keywords, priority,
-             -- source_url added by migration; coalesce guards legacy DBs
              COALESCE(source_url, NULL) AS source_url
       FROM faq_entries
       WHERE is_active = true
         AND (
-          question ILIKE $1
-          OR answer   ILIKE $1
-          OR keywords && $2::text[]
+          ${conditions}
+          OR keywords && $${nextIndex}::text[]
         )
       ORDER BY priority DESC
-      LIMIT $3
-      `,
-      [`%${keywords.join('%')}%`, keywords, limit]
-    );
+      LIMIT $${nextIndex + 1}
+    `;
 
+    const result = await query(sql, [...params, toPgArray(keywords), limit]);
     return result.rows;
   } catch (err) {
     console.error('FAQ search error:', err.message);
@@ -33,33 +72,38 @@ async function searchFAQ(searchQuery, limit = 3) {
   }
 }
 
-/**
- * Search insurance products
- */
+// ---------------------------------------------------------------------------
+// searchInsuranceProducts
+// ---------------------------------------------------------------------------
 async function searchInsuranceProducts(searchQuery, limit = 5) {
   try {
-    const keywords = searchQuery.toLowerCase().split(/\W+/).filter(Boolean);
+    const keywords = searchQuery
+      .toLowerCase()
+      .split(/\W+/)
+      .filter(w => w.length > 2);
+
     if (keywords.length === 0) return [];
 
-    const result = await query(
-      `
+    const { conditions, params, nextIndex } = buildIlikeConditions(
+      keywords,
+      ['category', 'sub_category', 'description', 'benefits'],
+      1
+    );
+
+    const sql = `
       SELECT id, category, sub_category, description, benefits, keywords,
              COALESCE(source_url, NULL) AS source_url
       FROM insurance_products
       WHERE is_active = true
         AND (
-          category     ILIKE $1
-          OR sub_category ILIKE $1
-          OR description  ILIKE $1
-          OR benefits     ILIKE $1
-          OR keywords && $2::text[]
+          ${conditions}
+          OR keywords && $${nextIndex}::text[]
         )
       ORDER BY category, sub_category
-      LIMIT $3
-      `,
-      [`%${keywords.join('%')}%`, keywords, limit]
-    );
+      LIMIT $${nextIndex + 1}
+    `;
 
+    const result = await query(sql, [...params, toPgArray(keywords), limit]);
     return result.rows;
   } catch (err) {
     console.error('Insurance products search error:', err.message);
@@ -67,9 +111,9 @@ async function searchInsuranceProducts(searchQuery, limit = 5) {
   }
 }
 
-/**
- * Get all products (backwards-compatible)
- */
+// ---------------------------------------------------------------------------
+// getProducts — unchanged logic, kept for backwards compatibility
+// ---------------------------------------------------------------------------
 async function getProducts(category = null, subsidiary = null) {
   try {
     let sql = 'SELECT * FROM insurance_products WHERE is_active = true';
@@ -97,22 +141,35 @@ async function getProducts(category = null, subsidiary = null) {
   }
 }
 
-/**
- * Find branches by city/region
- */
+// ---------------------------------------------------------------------------
+// findBranches
+// The branches table may not have a source_url column yet.
+// We query information_schema first and only SELECT it when it exists.
+// ---------------------------------------------------------------------------
 async function findBranches(city = null) {
   try {
-    // Select explicit columns — source_url included after migration
+    // Check once whether source_url exists on this DB instance
+    const colCheck = await query(
+      `SELECT 1 FROM information_schema.columns
+       WHERE table_name = 'branches' AND column_name = 'source_url'
+       LIMIT 1`
+    );
+    const hasSourceUrl = colCheck.rows.length > 0;
+
+    const sourceUrlCol = hasSourceUrl
+      ? 'source_url'
+      : "NULL::text AS source_url";
+
     let sql = `
       SELECT id, name, phone, address, region, city,
-             COALESCE(source_url, NULL) AS source_url
+             ${sourceUrlCol}
       FROM branches
       WHERE is_active = true
     `;
     const params = [];
 
     if (city) {
-      sql += ' AND (city ILIKE $1 OR region ILIKE $1)';
+      sql += ' AND (city ILIKE $1 OR region ILIKE $1 OR address ILIKE $1)';
       params.push(`%${city}%`);
     }
 
@@ -126,31 +183,38 @@ async function findBranches(city = null) {
   }
 }
 
-/**
- * Search company knowledge base
- */
+// ---------------------------------------------------------------------------
+// searchCompanyKnowledge
+// ---------------------------------------------------------------------------
 async function searchCompanyKnowledge(searchQuery, limit = 3) {
   try {
-    const keywords = searchQuery.toLowerCase().split(/\W+/).filter(Boolean);
+    const keywords = searchQuery
+      .toLowerCase()
+      .split(/\W+/)
+      .filter(w => w.length > 2);
+
     if (keywords.length === 0) return [];
 
-    const result = await query(
-      `
+    const { conditions, params, nextIndex } = buildIlikeConditions(
+      keywords,
+      ['title', 'content'],
+      1
+    );
+
+    const sql = `
       SELECT id, section, title, content, tags,
              COALESCE(source_url, NULL) AS source_url
       FROM company_knowledge
       WHERE is_active = true
         AND (
-          title   ILIKE $1
-          OR content ILIKE $1
-          OR tags  && $2::text[]
+          ${conditions}
+          OR tags && $${nextIndex}::text[]
         )
       ORDER BY updated_at DESC
-      LIMIT $3
-      `,
-      [`%${keywords.join('%')}%`, keywords, limit]
-    );
+      LIMIT $${nextIndex + 1}
+    `;
 
+    const result = await query(sql, [...params, toPgArray(keywords), limit]);
     return result.rows;
   } catch (err) {
     console.error('Company knowledge search error:', err.message);
@@ -158,9 +222,9 @@ async function searchCompanyKnowledge(searchQuery, limit = 3) {
   }
 }
 
-/**
- * Get product recommendation from DB search
- */
+// ---------------------------------------------------------------------------
+// getRecommendation
+// ---------------------------------------------------------------------------
 async function getRecommendation(need) {
   try {
     const matches = await searchInsuranceProducts(need, 5);
@@ -196,13 +260,13 @@ async function getRecommendation(need) {
   }
 }
 
-/**
- * Static quick facts fallback
- */
+// ---------------------------------------------------------------------------
+// getQuickFact — static fallback
+// ---------------------------------------------------------------------------
 async function getQuickFact(topic) {
   const facts = {
-    history: "CIC was founded in 1968 as a department of Kenya National Federation of Cooperatives and incorporated in 1978.",
-    contact: "Reach us at +254 20 2823000, info@cicinsurancegroup.com, or visit any of our 25+ branches.",
+    history: 'CIC was founded in 1968 as a department of Kenya National Federation of Cooperatives and incorporated in 1978.',
+    contact: 'Reach us at +254 20 2823000, info@cicinsurancegroup.com, or visit any of our 25+ branches.',
   };
 
   const lowerTopic = (topic || '').toLowerCase();
