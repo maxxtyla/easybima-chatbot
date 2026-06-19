@@ -27,21 +27,22 @@ export function MessageContent({ content, isUser }: MessageContentProps) {
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          // Paragraphs
+          // ── Paragraphs ──────────────────────────────────────────────────
+          // mb-2 (8px) between paragraphs; last-child gets no bottom margin
           p: ({ children }) => (
-            <p className="mb-3 last:mb-0 leading-relaxed">
+            <p className="mb-2 last:mb-0 leading-relaxed">
               {children}
             </p>
           ),
 
-          // Headings — keep them compact for a chat bubble
+          // ── Headings — compact for chat bubbles ─────────────────────────
           h1: ({ children }) => (
-            <p className="font-bold text-gray-900 mb-2 mt-3 first:mt-0">
+            <p className="font-bold text-gray-900 mb-1 mt-3 first:mt-0">
               {children}
             </p>
           ),
           h2: ({ children }) => (
-            <p className="font-semibold text-gray-900 mb-2 mt-3 first:mt-0">
+            <p className="font-semibold text-gray-900 mb-1 mt-2 first:mt-0">
               {children}
             </p>
           ),
@@ -51,43 +52,49 @@ export function MessageContent({ content, isUser }: MessageContentProps) {
             </p>
           ),
 
-          // Unordered lists
+          // ── Unordered lists ─────────────────────────────────────────────
+          // pl-0 so the list itself is not indented; indentation comes from
+          // the flex layout on each <li> via the gap between bullet and text.
           ul: ({ children }) => (
-            <ul className="mb-3 last:mb-0 space-y-1 pl-1">
+            <ul className="mb-2 last:mb-0 space-y-0.5 pl-0">
               {children}
             </ul>
           ),
 
-          // Ordered lists
+          // ── Ordered lists ───────────────────────────────────────────────
           ol: ({ children }) => (
-            <ol className="mb-3 last:mb-0 space-y-1 pl-1 list-decimal list-inside">
+            <ol className="mb-2 last:mb-0 space-y-0.5 pl-4 list-decimal">
               {children}
             </ol>
           ),
 
-          // List items — custom bullet so it matches CIC red brand
+          // ── List items — custom CIC-red bullet ──────────────────────────
+          // Using a CSS class for the dot so margin-top aligns it precisely
+          // with the cap-height of 14px Inter text (see globals.css).
           li: ({ children }) => (
             <li className="flex items-start gap-2 leading-relaxed">
-              <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-cic-red" />
-              <span>{children}</span>
+              <span
+                className="bima-bullet bg-cic-red flex-shrink-0"
+                aria-hidden="true"
+              />
+              <span className="flex-1 min-w-0">{children}</span>
             </li>
           ),
 
-          // Bold
+          // ── Inline elements ─────────────────────────────────────────────
           strong: ({ children }) => (
             <strong className="font-semibold text-gray-900">
               {children}
             </strong>
           ),
 
-          // Italic
           em: ({ children }) => (
             <em className="italic text-gray-700">
               {children}
             </em>
           ),
 
-          // Clickable links — open in new tab
+          // ── Links — open in new tab ─────────────────────────────────────
           a: ({ href, children }) => (
             <a
               href={href}
@@ -99,21 +106,21 @@ export function MessageContent({ content, isUser }: MessageContentProps) {
             </a>
           ),
 
-          // Blockquote — used for tips / callouts
+          // ── Blockquote — tips / callouts ────────────────────────────────
           blockquote: ({ children }) => (
-            <blockquote className="border-l-4 border-cic-red bg-red-50 pl-3 pr-2 py-2 my-3 rounded-r-md text-gray-700 italic">
+            <blockquote className="border-l-4 border-cic-red bg-red-50 pl-3 pr-2 py-2 my-2 rounded-r-md text-gray-700 italic">
               {children}
             </blockquote>
           ),
 
-          // Inline code
+          // ── Inline code ─────────────────────────────────────────────────
           code: ({ children }) => (
             <code className="bg-gray-100 text-gray-800 px-1 py-0.5 rounded text-xs font-mono">
               {children}
             </code>
           ),
 
-          // Suppress horizontal rules — they look odd in a bubble
+          // ── Suppress horizontal rules — look odd in chat bubbles ────────
           hr: () => null,
         }}
       >

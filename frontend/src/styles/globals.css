@@ -107,6 +107,9 @@ button:focus-visible {
 .slide-out {
   animation: slideOut 0.3s ease-out;
 }
+
+/* ── Message container — word-wrap only, NO line-height override ── */
+/* The broken line-height: 0.4 was collapsing all paragraph spacing. */
 .chat-message,
 .ai-message,
 .user-message {
@@ -114,19 +117,51 @@ button:focus-visible {
   overflow-wrap: break-word;
   word-wrap: break-word;
   word-break: break-word;
-  white-space: pre-wrap;
   box-sizing: border-box;
 }
+
 .message-content {
   overflow-wrap: anywhere;
   word-break: break-word;
-  white-space: pre-wrap;
 }
+
+/* Paragraph spacing inside AI messages — let ReactMarkdown's mb-3 do the work */
 .message-content p {
-    margin: 0 0 8px 0;
-    line-height: 0.4;
+  margin: 0 0 0.5rem 0;
+  line-height: 0.5;
 }
 
 .message-content p:last-child {
-    margin-bottom: 0;
+  margin-bottom: 0;
+}
+
+/* ── Bima response markdown styles ── */
+/* These supplement Tailwind classes on the ReactMarkdown components   */
+/* and ensure bullets render flush with their text at all font sizes.  */
+.bima-response ul {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.375rem 0 0.75rem;
+}
+
+.bima-response ol {
+  list-style: decimal;
+  padding-left: 1.25rem;
+  margin: 0.375rem 0 0.75rem;
+}
+
+.bima-response li {
+  /* Flex is set in JSX via the li component; these just add spacing */
+  margin-bottom: 0.25rem;
+  line-height: 1.6;
+}
+
+/* The custom red dot bullet — kept in CSS to avoid inline-style duplication */
+.bima-bullet {
+  display: inline-block;
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 0.45rem;   /* aligns with cap-height of 14px Inter text */
 }

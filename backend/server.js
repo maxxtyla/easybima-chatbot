@@ -75,12 +75,8 @@ process.on('SIGTERM', () => {
 });
 // Start server
 app.listen(PORT, () => {
-  console.log(`╔════════════════════════════════════════════════════════════╗`);
-  console.log(`║           Bima AI Chatbot Backend                          ║`);
-  console.log(`║           CIC Insurance Group - Kenya                      ║`);
-  console.log(`╠════════════════════════════════════════════════════════════╣`);
-  console.log(`║           Server running on port: ${PORT}                           ║`);
-  console.log(`╚════════════════════════════════════════════════════════════╝`);
+  console.log(`         Bima AI Chatbot Backend                        `);
+  console.log(`         Server running on port: ${PORT}                `);
 });
 
 module.exports = app;
