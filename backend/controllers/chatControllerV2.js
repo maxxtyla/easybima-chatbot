@@ -1,4 +1,5 @@
 const { getClaudeResponse, checkEscalationTriggers, detectSentiment } = require('../services/claudeService');
+const { sanitizeForUser } = require('../utils/sanitizeResponse');
 const {
   initializeSession,
   updateSessionActivity,
@@ -200,7 +201,20 @@ async function handleChat(req, res) {
 
     // ── STEP 6: AI response ────────────────────────────────────────────────
 
-    const aiResponse = await getClaudeResponse(message, history, contextData);
+    const rawAiResponse = await getClaudeResponse(message, history, contextData);
+
+    // SECURITY: second, independent safety check at the controller
+    // boundary — the actual line that persists to the DB and the line
+    // that returns to the frontend. claudeService.getClaudeResponse()
+    // already filters out raw model reasoning, but this is a deliberate
+    // belt-and-suspenders check so a future code change upstream can
+    // never silently let internal reasoning reach a user-facing response.
+    const aiResponse = sanitizeForUser(rawAiResponse);
+
+    if (!aiResponse) {
+      console.error('❌ AI response failed final safety check (looked like internal reasoning) — refusing to forward it');
+      return res.status(500).json(buildErrorResponse(new Error('unsafe_ai_response_blocked'), sessionId));
+    }
 
     // ── STEP 7: Persist & respond ──────────────────────────────────────────
 
