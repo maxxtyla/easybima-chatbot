@@ -5,8 +5,9 @@ const {
   checkSessionStatus,
   recoverSessionFromDB,
   getConversationWithExpirationCheck,
+  endSessionInMemory,
 } = require('../services/sessionManager');
-const { getConversation, saveConversation, logMessage, logAnalytics, generateSessionId } = require('../services/conversationService');
+const { getConversation, saveConversation, logMessage, logAnalytics, generateSessionId, deleteConversationData } = require('../services/conversationService');
 const {
   buildChatResponse,
   buildSessionExpiredResponse,
@@ -314,4 +315,45 @@ async function keepAliveSession(req, res) {
   }
 }
 
-module.exports = { handleChat, getConversationHistory, keepAliveSession };
+/**
+ * POST /api/chat/end-session
+ *
+ * Called when the user explicitly confirms they want to end the
+ * conversation from the frontend (e.g. clicking the X and confirming
+ * the "End this conversation?" dialog).
+ *
+ * Unlike idle expiration (which is passive and recoverable), this is a
+ * deliberate, user-initiated close: the session is dropped from the
+ * in-memory active-sessions index immediately and the stored message
+ * history for that session is wiped, so the next time the widget is
+ * opened it starts a brand-new conversation.
+ */
+async function endSession(req, res) {
+  const { sessionId } = req.body;
+
+  try {
+    if (!sessionId) {
+      return res.status(400).json({ error: 'missing_session_id', message: 'sessionId is required' });
+    }
+
+    await logAnalytics(sessionId, 'session_ended_by_user', {
+      timestamp: new Date().toISOString(),
+    }).catch(() => {});
+
+    await deleteConversationData(sessionId);
+    endSessionInMemory(sessionId);
+
+    return res.json({
+      success: true,
+      sessionId,
+      message: 'Session ended and cleaned up successfully',
+      timestamp: new Date().toISOString(),
+    });
+
+  } catch (error) {
+    console.error('Error ending session:', error);
+    return res.status(500).json({ error: 'end_session_failed', message: 'Failed to end session' });
+  }
+}
+
+module.exports = { handleChat, getConversationHistory, keepAliveSession, endSession };

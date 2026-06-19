@@ -5,6 +5,7 @@ import { Header } from './Header'
 import { MessageList } from './MessageList'
 import { InputBar } from './InputBar'
 import { QuickQuestions } from './QuickQuestions'
+import { ConfirmEndChatModal } from './ConfirmEndChatModal'
 import { useChat } from '@/hooks/useChat'
 import { QuickQuestion } from '@/types/chat'
 
@@ -37,22 +38,48 @@ const QUICK_QUESTIONS: QuickQuestion[] = [
 ]
 
 interface ChatWindowProps {
-  onClose?: () => void
+  // The chat state/actions are owned by the parent (ChatWidget) so it can
+  // make close-confirmation decisions (e.g. "is there an active
+  // conversation?") without ChatWindow needing to expose internals.
+  chat: ReturnType<typeof useChat>
+  // Called when the user clicks the header's close (X) button. The parent
+  // decides whether that should immediately collapse the widget or first
+  // show the "end conversation?" confirmation.
+  onRequestClose: () => void
+  showCloseConfirm: boolean
+  isEndingSession?: boolean
+  onConfirmClose: () => void
+  onCancelClose: () => void
 }
 
-export function ChatWindow({ onClose }: ChatWindowProps) {
-  const { messages, isLoading, handleSendMessage } = useChat()
+export function ChatWindow({
+  chat,
+  onRequestClose,
+  showCloseConfirm,
+  isEndingSession,
+  onConfirmClose,
+  onCancelClose,
+}: ChatWindowProps) {
+  const { messages, isLoading, handleSendMessage } = chat
   const showQuickQuestions = messages.length === 0
 
   return (
-    <div className="flex flex-col h-full bg-cic-white rounded-lg shadow-widget overflow-hidden">
-      <Header onClose={onClose} />
+    <div className="relative flex flex-col h-full bg-cic-white rounded-lg shadow-widget overflow-hidden">
+      <Header onClose={onRequestClose} />
 
       <MessageList messages={messages} isLoading={isLoading} />
 
       {showQuickQuestions && <QuickQuestions questions={QUICK_QUESTIONS} onSelect={handleSendMessage} isLoading={isLoading} />}
 
       <InputBar onSend={handleSendMessage} isLoading={isLoading} />
+
+      {showCloseConfirm && (
+        <ConfirmEndChatModal
+          onConfirm={onConfirmClose}
+          onCancel={onCancelClose}
+          isEnding={isEndingSession}
+        />
+      )}
     </div>
   )
 }

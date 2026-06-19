@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { handleChat, getConversationHistory, keepAliveSession } = require('../controllers/chatControllerV2');
+const { handleChat, getConversationHistory, keepAliveSession, endSession } = require('../controllers/chatControllerV2');
 const { validateInput } = require('../middleware/validateInput');
 
 /**
@@ -58,6 +58,28 @@ router.get('/conversation/:sessionId', getConversationHistory);
  * }
  */
 router.post('/keep-alive', keepAliveSession);
+
+/**
+ * POST /api/chat/end-session
+ * Explicitly end & clean up a conversation when the user confirms
+ * closing the chat widget (as opposed to letting it idle-time-out).
+ * Deletes the stored message history for the session and drops it from
+ * the in-memory session index so the next open starts fresh.
+ *
+ * Request body:
+ * {
+ *   sessionId: string
+ * }
+ *
+ * Response:
+ * {
+ *   success: boolean,
+ *   sessionId: string,
+ *   message: string,
+ *   timestamp: ISO string
+ * }
+ */
+router.post('/end-session', endSession);
 
 /**
  * GET /api/chat/health

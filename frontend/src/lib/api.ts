@@ -29,6 +29,17 @@ export async function keepAliveSession(sessionId: string) {
   return response.json();
 }
 
+export async function endSession(sessionId: string) {
+  const response = await fetch(`${API_BASE}/chat/end-session`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId }),
+  });
+
+  if (!response.ok) throw new Error('Failed to end session');
+  return response.json();
+}
+
 export async function getConversationHistory(sessionId: string) {
   const response = await fetch(`${API_BASE}/chat/conversation/${sessionId}`);
 

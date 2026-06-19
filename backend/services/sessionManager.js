@@ -252,6 +252,17 @@ function getSessionStats() {
   return { activeSessions: activeSessions.size, sessionConfig: SESSION_CONFIG, timestamp: new Date().toISOString() };
 }
 
+// ─── endSessionInMemory ───────────────────────────────────────────────────────
+/**
+ * Removes a session from the in-memory active-sessions index immediately.
+ * Used when a user explicitly ends a conversation (vs. letting it idle out),
+ * so the next message with this sessionId is treated as truly gone rather
+ * than recoverable from the DB.
+ */
+function endSessionInMemory(sessionId) {
+  return activeSessions.delete(sessionId);
+}
+
 module.exports = {
   initializeSession,
   updateSessionActivity,
@@ -262,4 +273,5 @@ module.exports = {
   startCleanupScheduler,
   stopCleanupScheduler,
   getSessionStats,
+  endSessionInMemory,            // ← new export
 };

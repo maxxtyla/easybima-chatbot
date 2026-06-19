@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { Message, ChatState } from '@/types/chat';
 import { generateId } from '@/lib/utils';
-import { sendMessage, keepAliveSession } from '@/lib/api';
+import { sendMessage, keepAliveSession, endSession } from '@/lib/api';
 
 const STORAGE_KEY = 'cic-chat-session';
 
@@ -103,6 +103,26 @@ export function useChat() {
     setState((prev) => ({ ...prev, messages: [], sessionId: newSessionId }));
   }, []);
 
+  // Explicit, user-confirmed end of the conversation: tells the backend to
+  // close the session and wipe its stored messages, then resets local
+  // state so the widget is ready for a brand-new conversation next time
+  // it's opened. Best-effort on the backend call — local state is always
+  // reset even if the network request fails, so the user never gets stuck.
+  const endChatSession = useCallback(async () => {
+    const sessionToEnd = state.sessionId;
+    try {
+      if (sessionToEnd) {
+        await endSession(sessionToEnd);
+      }
+    } catch (error) {
+      console.error('Failed to end session on backend:', error);
+    } finally {
+      const newSessionId = generateId();
+      localStorage.setItem(STORAGE_KEY, newSessionId);
+      setState((prev) => ({ ...prev, messages: [], sessionId: newSessionId }));
+    }
+  }, [state.sessionId]);
+
   const toggleChat = useCallback(() => {
     setState((prev) => ({ ...prev, isOpen: !prev.isOpen }));
   }, []);
@@ -112,6 +132,7 @@ export function useChat() {
     addMessage,
     handleSendMessage,
     clearMessages,
+    endChatSession,
     toggleChat,
   };
 }

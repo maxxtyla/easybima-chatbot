@@ -3,15 +3,55 @@
 import React from 'react'
 import { ChatWindow } from './ChatWindow'
 import { cn } from '@/lib/utils'
+import { useChat } from '@/hooks/useChat'
 
 export function ChatWidget() {
   const [isOpen, setIsOpen] = React.useState(false)
+  const [showCloseConfirm, setShowCloseConfirm] = React.useState(false)
+  const [isEndingSession, setIsEndingSession] = React.useState(false)
   const widgetRef = React.useRef<HTMLDivElement>(null)
 
-  // Close chat when clicking outside
+  // Lifted up from ChatWindow so this component can decide whether closing
+  // needs confirmation (i.e. is there an active conversation to lose?).
+  const chat = useChat()
+  const hasActiveConversation = chat.messages.length > 0
+
+  // Clicking the X (or the floating launcher while open) goes through here
+  // rather than closing immediately. An empty conversation closes right
+  // away; an active one requires explicit confirmation.
+  const requestClose = React.useCallback(() => {
+    if (hasActiveConversation) {
+      setShowCloseConfirm(true)
+    } else {
+      setIsOpen(false)
+    }
+  }, [hasActiveConversation])
+
+  const confirmClose = React.useCallback(async () => {
+    setIsEndingSession(true)
+    try {
+      // Tell the backend to close the session and wipe its stored
+      // messages, then reset local state for a brand-new conversation.
+      await chat.endChatSession()
+    } finally {
+      setIsEndingSession(false)
+      setShowCloseConfirm(false)
+      setIsOpen(false)
+    }
+  }, [chat])
+
+  const cancelClose = React.useCallback(() => {
+    setShowCloseConfirm(false)
+  }, [])
+
+  // Close chat when clicking outside the widget — but only when there's
+  // nothing to lose. If a conversation is underway, an accidental outside
+  // click shouldn't silently discard it; the user must use the X button,
+  // which triggers the confirmation dialog above.
   React.useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (widgetRef.current && !widgetRef.current.contains(event.target as Node)) {
+        if (hasActiveConversation) return
         setIsOpen(false)
       }
     }
@@ -20,7 +60,7 @@ export function ChatWidget() {
       document.addEventListener('mousedown', handleClickOutside)
       return () => document.removeEventListener('mousedown', handleClickOutside)
     }
-  }, [isOpen])
+  }, [isOpen, hasActiveConversation])
 
   return (
     <div
@@ -40,13 +80,20 @@ export function ChatWidget() {
             'slide-in origin-bottom-right'
           )}
         >
-          <ChatWindow onClose={() => setIsOpen(false)} />
+          <ChatWindow
+            chat={chat}
+            onRequestClose={requestClose}
+            showCloseConfirm={showCloseConfirm}
+            isEndingSession={isEndingSession}
+            onConfirmClose={confirmClose}
+            onCancelClose={cancelClose}
+          />
         </div>
       )}
 
       {/* Chat Button */}
       <button
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={() => (isOpen ? requestClose() : setIsOpen(true))}
         className={cn(
           'w-14 h-14 rounded-full bg-cic-red text-cic-white',
           'flex items-center justify-center',

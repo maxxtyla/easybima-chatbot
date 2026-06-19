@@ -178,6 +178,36 @@ async function clearExpiredSessions(timeoutMs = 1800000) {
   }
 }
 
+/**
+ * Permanently delete a session's chat content when the user explicitly
+ * ends the conversation (as opposed to it idling out).
+ *
+ * - All messages for the session are deleted (this is the actual chat
+ *   content the user wants wiped).
+ * - The conversation row is kept but flagged as ended, rather than hard
+ *   deleted, so it doesn't collide with any FK from the analytics table
+ *   and so we retain a lightweight audit trail (no message content) of
+ *   when sessions were explicitly closed.
+ */
+async function deleteConversationData(sessionId) {
+  try {
+    await pool.query('DELETE FROM messages WHERE session_id = $1', [sessionId]);
+
+    await pool.query(
+      `UPDATE conversations
+       SET metadata = jsonb_set(COALESCE(metadata, '{}'), '{endedByUser}', 'true'),
+           updated_at = NOW()
+       WHERE session_id = $1`,
+      [sessionId]
+    );
+
+    return true;
+  } catch (error) {
+    console.error('Error deleting conversation data:', error);
+    throw error;
+  }
+}
+
 module.exports = {
   getConversation,
   saveConversation,
@@ -185,4 +215,5 @@ module.exports = {
   logAnalytics,
   generateSessionId,
   clearExpiredSessions,
+  deleteConversationData,
 };
