@@ -1,5 +1,3 @@
-// ---------------------------------------------------------------------------
-// whatsappController.js
 //
 // Handles inbound Twilio WhatsApp webhook requests. Reuses the exact same
 // RAG + Claude pipeline as the web widget via chatEngine.processMessage —
@@ -8,10 +6,9 @@
 //      user's conversation persists across messages without any client-
 //      side session management (there's no JS running on WhatsApp).
 //   2. Formatting/splitting the reply for WhatsApp and returning TwiML.
-// ---------------------------------------------------------------------------
 
 const chatEngine = require('../services/chatEngine');
-const { formatForWhatsApp, splitForWhatsApp } = require('../services/whatsappService');
+const { sendWhatsAppMessage } = require('../services/whatsappService');
 const { logAnalytics } = require('../services/conversationService');
 const twilio = require('twilio');
 
@@ -51,40 +48,51 @@ async function handleWhatsAppWebhook(req, res) {
 
   const sessionId = from; // e.g. "whatsapp:+254712345678" — stable per user
 
-  try {
-    const result = await chatEngine.processMessage({
-      message,
-      sessionId,
-      meta: {
-        channel: 'whatsapp',
-        userAgent: 'twilio-whatsapp',
-        ip: req.ip,
-        profileName,
-      },
-    });
+  // ── Ack the webhook immediately 
+  // Twilio gives us ~15s to return TwiML before it drops the request as
+  // timed out — and it does this SILENTLY (no error in our logs, nothing
+  // delivered to the phone), even though our pipeline finishes fine a few
+  // seconds later. The RAG pipeline (DB queries + Claude/OpenRouter call)
+  // can intermittently exceed that window, which is why replies sometimes
+  // never arrive even though "the backend shows the response was generated".
+  //
+  // Fix: respond with empty TwiML right away (no timeout pressure), then
+  // run the actual pipeline in the background and deliver the real reply
+  // via the Twilio REST API (sendWhatsAppMessage), which has no such limit.
+  res.type('text/xml');
+  res.send(twiml.toString());
 
-    const formatted = formatForWhatsApp(result.aiResponse);
-    const chunks = splitForWhatsApp(formatted);
+  (async () => {
+    try {
+      const result = await chatEngine.processMessage({
+        message,
+        sessionId,
+        meta: {
+          channel: 'whatsapp',
+          userAgent: 'twilio-whatsapp',
+          ip: req.ip,
+          profileName,
+        },
+      });
 
-    for (const chunk of chunks) {
-      twiml.message(chunk);
+      await sendWhatsAppMessage(sessionId, result.aiResponse);
+
+    } catch (error) {
+      console.error('❌ WhatsApp handler error:', error);
+
+      logAnalytics(sessionId, 'whatsapp_error_occurred', {
+        error: error.message,
+        timestamp: new Date().toISOString(),
+      }).catch(() => {});
+
+      sendWhatsAppMessage(
+        sessionId,
+        "Sorry, I ran into a problem processing that. Please try again, or call us on +254 20 2823000."
+      ).catch((sendErr) => {
+        console.error('❌ Failed to deliver WhatsApp error message:', sendErr);
+      });
     }
-
-    res.type('text/xml');
-    return res.send(twiml.toString());
-
-  } catch (error) {
-    console.error('❌ WhatsApp handler error:', error);
-
-    logAnalytics(sessionId, 'whatsapp_error_occurred', {
-      error: error.message,
-      timestamp: new Date().toISOString(),
-    }).catch(() => {});
-
-    twiml.message("Sorry, I ran into a problem processing that. Please try again, or call us on +254 20 2823000.");
-    res.type('text/xml');
-    return res.send(twiml.toString());
-  }
+  })();
 }
 
 module.exports = { handleWhatsAppWebhook };
