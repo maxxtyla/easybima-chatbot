@@ -25,7 +25,7 @@ const validateInput = (req, res, next) => {
     });
   }
 
-  // Fix: use trim() only — do NOT use validator.escape() here.
+  //  use trim() only — do NOT use validator.escape() here.
   // validator.escape() converts apostrophes/quotes to HTML entities (&#x27; etc.)
   // which corrupts the plain-text prompt sent to the AI model.
   const sanitizedMessage = message.trim();

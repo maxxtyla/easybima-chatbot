@@ -7,6 +7,7 @@ const dotenv = require('dotenv');
 
 
 const chatRoutesV2 = require('./routes/chatV2');
+const whatsappRoutes = require('./routes/whatsapp');
 
 const { startCleanupScheduler, stopCleanupScheduler } = require('./services/sessionManager');
 const { rateLimiter } = require('./middleware/rateLimiter');
@@ -56,6 +57,7 @@ app.get('/health', (req, res) => {
 
 // API routes
 app.use('/api/chat', chatRoutesV2);
+app.use('/api/whatsapp', whatsappRoutes);
 
 // 404 handler
 app.use((req, res) => {
