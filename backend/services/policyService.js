@@ -1,37 +1,5 @@
 const { query } = require('../config/database');
-
-// ---------------------------------------------------------------------------
-// STOP-WORDS — filtered out before keyword matching so generic words like
-// "what", "your", "offer" don't dilute or block real matches.
-// ---------------------------------------------------------------------------
-const STOP_WORDS = new Set([
-  'the','and','for','are','but','not','you','all','any','can','her','was',
-  'one','our','out','had','his','has','have','him','his','how','its','may',
-  'nor','now','own','say','she','too','use','was','way','who','why','will',
-  'with','that','this','they','from','been','come','does','done','each',
-  'even','find','give','goes','into','just','know','like','make','more',
-  'much','need','only','over','same','such','take','tell','than','them',
-  'then','thus','till','upon','used','very','want','well','were','what',
-  'when','whom','your','about','after','also','back','both','does','down',
-  'duly','else','find','first','from','give','good','here','just','keep',
-  'kind','last','left','life','live','long','look','most','much','near',
-  'next','only','open','part','past','seek','self','show','some','sort',
-  'stay','such','tell','tend','time','type','unto','upon','used','view',
-  'ways','wish','work','year','years','offer','offers','product','products',
-  'insurance','insure','insured','policy','policies','does','have','please',
-  'would','could','should','shall','might','must','been','being','where',
-  'there','their','those','these','other','every','which','while','before',
-]);
-
-// ---------------------------------------------------------------------------
-// Helper — extract meaningful keywords, filtering stop-words and short tokens
-// ---------------------------------------------------------------------------
-function extractKeywords(searchQuery) {
-  return searchQuery
-    .toLowerCase()
-    .split(/\W+/)
-    .filter(w => w.length > 2 && !STOP_WORDS.has(w));
-}
+const { extractKeywords } = require('../utils/keywords');
 
 // ---------------------------------------------------------------------------
 // Helper — builds individual ILIKE conditions from a keyword array so that

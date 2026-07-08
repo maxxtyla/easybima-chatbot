@@ -27,9 +27,7 @@ const {
   searchInsuranceProducts,
 } = require('./policyService');
 const { rankResults } = require('../utils/rankResults');
-
-const BRANCH_KEYWORDS = ['branch', 'office', 'location', 'near me', 'find', 'where', 'visit', 'address', 'directions'];
-const PRODUCT_KEYWORDS = ['product', 'cover', 'coverage', 'insure', 'insurance', 'policy', 'plan', 'benefit', 'offer', 'what do you'];
+const { classifyIntent } = require('../utils/intentRouter');
 
 /**
  * Core pipeline. Channel-specific controllers call this and then format
@@ -130,26 +128,47 @@ async function processMessage({ message, sessionId: providedSessionId, meta = {}
     };
   }
 
-  // ── STEP 5: Parallel RAG retrieval ────────────────────────────────────
-  const lowerMsg = message.toLowerCase();
-  const wantsBranches = BRANCH_KEYWORDS.some(kw => lowerMsg.includes(kw));
-  const wantsProducts = PRODUCT_KEYWORDS.some(kw => lowerMsg.includes(kw));
+  // ── STEP 5: Intent-routed RAG retrieval ────────────────────────────────
+  // Instead of querying every table on every message, we extract keywords
+  // and classify intent first, then only hit the tables that are actually
+  // relevant. This cuts DB load and reduces irrelevant context being
+  // stuffed into the Claude prompt.
+  const intent = classifyIntent(message);
 
   console.log(`\n📨 [RAG/${meta.channel || 'web'}] Incoming: "${message.substring(0, 80)}"`);
-  console.log(`   branch intent : ${wantsBranches}`);
-  console.log(`   product intent: ${wantsProducts}`);
+  console.log(`   keywords      : [${intent.keywords.join(', ') || 'none'}]`);
+  console.log(`   faq intent    : ${intent.wantsFAQ}`);
+  console.log(`   product intent: ${intent.wantsProducts}`);
+  console.log(`   branch intent : ${intent.wantsBranches}`);
+  console.log(`   company intent: ${intent.wantsCompanyInfo}`);
 
-  const [faqMatches, companyInfoMatches, recommendation, directProducts] = await Promise.all([
-    searchFAQ(message, 5),
-    searchCompanyKnowledge(message, 3),
-    getRecommendation(message),
-    searchInsuranceProducts(message, 6),
-  ]);
+  // Build only the queries we actually need, run them in parallel, then
+  // map results back by label (avoids fragile positional destructuring
+  // now that the query list length varies per message).
+  const jobs = [];
+
+  if (intent.wantsFAQ) {
+    jobs.push(['faq', searchFAQ(message, 5)]);
+  }
+  if (intent.wantsCompanyInfo) {
+    jobs.push(['company', searchCompanyKnowledge(message, 3)]);
+  }
+  if (intent.wantsProducts) {
+    jobs.push(['products', searchInsuranceProducts(message, 6)]);
+    jobs.push(['recommendation', getRecommendation(message)]);
+  }
+
+  const settled = await Promise.all(jobs.map(([, promise]) => promise));
+  const resultsByLabel = Object.fromEntries(jobs.map(([label], i) => [label, settled[i]]));
+
+  const faqMatches = resultsByLabel.faq || [];
+  const companyInfoMatches = resultsByLabel.company || [];
+  const directProducts = resultsByLabel.products || [];
+  const recommendation = resultsByLabel.recommendation || { matchedProducts: [] };
 
   let branches = [];
-  if (wantsBranches) {
-    const cityMatch = message.match(/(?:in|at|near|around)\s+(\w+)/i);
-    branches = await findBranches(cityMatch ? cityMatch[1] : null);
+  if (intent.wantsBranches) {
+    branches = await findBranches(intent.cityHint);
   }
 
   // ── STEP 5b: Rank & assemble context ──────────────────────────────────
