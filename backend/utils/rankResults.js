@@ -6,6 +6,7 @@ function rankResults(results, userMessage) {
       const haystack = [
         row.question, row.answer, row.title, row.content,
         row.description, row.benefits,
+        row.name, row.city, row.region, row.address,
         ...(row.keywords || [])
       ].join(' ').toLowerCase();
 

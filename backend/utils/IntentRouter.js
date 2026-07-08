@@ -19,6 +19,7 @@
 //
 
 const { extractKeywords } = require('./keywords');
+const { query } = require('../config/database');
 
 const BRANCH_KEYWORDS = [
   'branch', 'branches', 'office', 'location', 'near me', 'find', 'where',
@@ -79,6 +80,59 @@ function matchesAny(lowerMsg, keywordList) {
   return keywordList.some(kw => lowerMsg.includes(kw));
 }
 
+// ---------------------------------------------------------------------------
+// Known branch locations — pulled from branches.city / branches.region /
+// branches.keywords so that mentioning a place name alone ("accident in
+// Bungoma") triggers branch retrieval, even without a generic word like
+// "branch" or "office" in the message. BRANCH_KEYWORDS above stays as the
+// static fallback for phrasing like "where can I find you".
+//
+// Cached in memory (5 min TTL) since this list barely changes and we don't
+// want a DB round trip on every single message.
+// ---------------------------------------------------------------------------
+const LOCATION_CACHE_TTL_MS = 5 * 60 * 1000;
+let locationCache = null; // Set<string>
+let locationCacheExpiry = 0;
+
+async function getKnownLocationTerms() {
+  const now = Date.now();
+  if (locationCache && now < locationCacheExpiry) {
+    return locationCache;
+  }
+
+  try {
+    const result = await query(
+      `SELECT city, region, keywords FROM branches WHERE is_active = true`
+    );
+
+    const terms = new Set();
+    for (const row of result.rows) {
+      if (row.city) terms.add(row.city.toLowerCase());
+      if (row.region) terms.add(row.region.toLowerCase());
+      (row.keywords || []).forEach(kw => {
+        if (kw) terms.add(kw.toLowerCase());
+      });
+    }
+
+    locationCache = terms;
+    locationCacheExpiry = now + LOCATION_CACHE_TTL_MS;
+    return terms;
+  } catch (err) {
+    console.error('[IntentRouter] Failed to load branch locations, falling back to static keywords only:', err.message);
+    // Don't cache the failure — retry next call — but return an empty set
+    // for this call so classifyIntent still works off BRANCH_KEYWORDS alone.
+    return locationCache || new Set();
+  }
+}
+
+function matchesLocation(lowerMsg, locationTerms) {
+  for (const term of locationTerms) {
+    // Skip 1-2 char terms (e.g. stray short tags) to avoid noisy false positives
+    if (term.length > 2 && lowerMsg.includes(term)) return term;
+  }
+  return null;
+}
+
 /**
  * classifyIntent(message)
  *
@@ -96,18 +150,29 @@ function matchesAny(lowerMsg, keywordList) {
  * we default wantsFAQ + wantsCompanyInfo to true. Those two hold the most
  * general-purpose content, so they're the cheapest, safest fallback for
  * ambiguous input rather than querying every table blindly.
+ *
+ * NOTE: now async — wantsBranches also checks the message against known
+ * branch city/region/keyword tags (cached from the DB), not just the
+ * static BRANCH_KEYWORDS list, so "accident in Bungoma" correctly pulls
+ * the Bungoma branch even without the word "branch" anywhere in it.
  */
-function classifyIntent(message) {
+async function classifyIntent(message) {
   const lowerMsg = (message || '').toLowerCase();
   const keywords = extractKeywords(message);
 
   let wantsFAQ = matchesAny(lowerMsg, FAQ_KEYWORDS);
   let wantsProducts = matchesAny(lowerMsg, PRODUCT_KEYWORDS);
-  let wantsBranches = matchesAny(lowerMsg, BRANCH_KEYWORDS);
   let wantsCompanyInfo = matchesAny(lowerMsg, COMPANY_KEYWORDS);
 
+  const branchKeywordHit = matchesAny(lowerMsg, BRANCH_KEYWORDS);
+
+  const locationTerms = await getKnownLocationTerms();
+  const matchedLocation = matchesLocation(lowerMsg, locationTerms);
+
+  let wantsBranches = branchKeywordHit || Boolean(matchedLocation);
+
   const cityMatch = (message || '').match(/(?:in|at|near|around)\s+(\w+)/i);
-  const cityHint = wantsBranches && cityMatch ? cityMatch[1] : null;
+  const cityHint = wantsBranches ? (matchedLocation || (cityMatch ? cityMatch[1] : null)) : null;
 
   const noIntentMatched =
     !wantsFAQ && !wantsProducts && !wantsBranches && !wantsCompanyInfo;

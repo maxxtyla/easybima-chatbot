@@ -204,11 +204,43 @@ async function getProducts(category = null, subsidiary = null) {
 }
 
 // ---------------------------------------------------------------------------
+// Words that are near-useless for narrowing branches specifically, because
+// they either appear in almost every row's `name` (e.g. "BUNGOMA BRANCH",
+// "MOMBASA BRANCH" — "branch" alone ILIKE-matches ~all of them) or are
+// generic claim/support chatter ("help", "claim", "customer") that has
+// nothing to do with location. Stripped before building the branches WHERE
+// clause so a message like "accident in Bungoma, help with my claim" narrows
+// to Bungoma instead of matching nearly the whole table on "branch"/"claim".
+// ---------------------------------------------------------------------------
+const BRANCH_NOISE_WORDS = new Set([
+  'branch', 'branches', 'office', 'offices', 'centre', 'center',
+  'location', 'locations', 'find', 'nearest', 'visit', 'address',
+  'directions', 'contact', 'phone', 'email', 'help', 'helped', 'get', 'got',
+  'process', 'claim', 'claims', 'customer', 'cic', 'hey', 'please',
+  'involved', 'accident', 'around', 'insurance', 'company',
+]);
+
+function stripBranchNoise(keywords) {
+  return keywords.filter(k => !BRANCH_NOISE_WORDS.has(k));
+}
+
+// ---------------------------------------------------------------------------
 // findBranches
+// Takes the raw user message (same contract as searchFAQ / searchInsurance-
+// Products) rather than a single regex-parsed city. Matches against the
+// branches.keywords array (aliases, landmarks, nicknames — see
+// migrations/add_branch_keywords.sql) with ILIKE on name/city/region/address
+// as a fallback, so "office near Two Rivers" or "Nai CBD branch" match even
+// though those phrases never appear verbatim in the address.
+//
+// `cityHint` (optional) is still accepted for back-compat / when a caller
+// already has a clean city string (e.g. a button/quick-reply) — when given,
+// it's folded into the keyword list rather than driving a separate query path.
+//
 // The branches table may not have a source_url column yet.
 // We query information_schema first and only SELECT it when it exists.
 // ---------------------------------------------------------------------------
-async function findBranches(city = null) {
+async function findBranches(searchQuery = null, cityHint = null) {
   try {
     const colCheck = await query(
       `SELECT 1 FROM information_schema.columns
@@ -218,48 +250,61 @@ async function findBranches(city = null) {
     const hasSourceUrl = colCheck.rows.length > 0;
     const sourceUrlCol = hasSourceUrl ? 'source_url' : 'NULL::text AS source_url';
 
+    let keywords = stripBranchNoise(extractKeywords(searchQuery));
+    const cleanCityHint = cityHint && !BRANCH_NOISE_WORDS.has(cityHint.toLowerCase())
+      ? cityHint.toLowerCase()
+      : null;
+    if (cleanCityHint && !keywords.includes(cleanCityHint)) {
+      keywords.push(cleanCityHint);
+    }
+
+    const allBranchesSql = `
+      SELECT id, name, phone, address, region, city, keywords,
+             ${sourceUrlCol}
+      FROM branches
+      WHERE is_active = true
+      ORDER BY region, name
+    `;
+
+    let result;
     let sql;
-    let params = [];
     let isFallback = false;
 
-    if (city) {
-      sql = `
-        SELECT id, name, phone, address, region, city,
-               ${sourceUrlCol}
-        FROM branches
-        WHERE is_active = true
-          AND (city ILIKE $1 OR region ILIKE $1 OR address ILIKE $1)
-        ORDER BY region, name
-      `;
-      params = [`%${city}%`];
-    } else {
-      sql = `
-        SELECT id, name, phone, address, region, city,
-               ${sourceUrlCol}
-        FROM branches
-        WHERE is_active = true
-        ORDER BY region, name
-      `;
-    }
-
-    const result = await query(sql, params);
-
-    // If city-specific search returned nothing, fall back to all branches
-    if (result.rowCount === 0 && city) {
+    if (keywords.length === 0) {
+      // No usable location keywords/city → return every active branch
       isFallback = true;
+      sql = allBranchesSql;
+      result = await query(sql, []);
+    } else {
+      const { conditions, params, nextIndex } = buildIlikeConditions(
+        keywords,
+        ['name', 'city', 'region', 'address'],
+        1
+      );
       sql = `
-        SELECT id, name, phone, address, region, city,
+        SELECT id, name, phone, address, region, city, keywords,
                ${sourceUrlCol}
         FROM branches
         WHERE is_active = true
+          AND (
+            ${conditions}
+            OR keywords && $${nextIndex}::text[]
+          )
         ORDER BY region, name
       `;
-      const fallbackResult = await query(sql, []);
-      logSearchDebug('branches', city ? [city] : [], fallbackResult.rowCount, sql, true);
-      return fallbackResult.rows;
+      result = await query(sql, [...params, toPgArray(keywords)]);
+
+      // No keyword/tag match → fall back to all active branches rather than
+      // returning nothing (a location the LLM should still be able to say
+      // "we don't have a branch there, but here's the full list")
+      if (result.rowCount === 0) {
+        isFallback = true;
+        sql = allBranchesSql;
+        result = await query(sql, []);
+      }
     }
 
-    logSearchDebug('branches', city ? [city] : [], result.rowCount, sql, isFallback);
+    logSearchDebug('branches', keywords, result.rowCount, sql, isFallback);
     return result.rows;
   } catch (err) {
     console.error('[RAG ERROR] Branch query failed:', err.message);

@@ -133,7 +133,7 @@ async function processMessage({ message, sessionId: providedSessionId, meta = {}
   // and classify intent first, then only hit the tables that are actually
   // relevant. This cuts DB load and reduces irrelevant context being
   // stuffed into the Claude prompt.
-  const intent = classifyIntent(message);
+  const intent = await classifyIntent(message);
 
   console.log(`\n📨 [RAG/${meta.channel || 'web'}] Incoming: "${message.substring(0, 80)}"`);
   console.log(`   keywords      : [${intent.keywords.join(', ') || 'none'}]`);
@@ -168,13 +168,14 @@ async function processMessage({ message, sessionId: providedSessionId, meta = {}
 
   let branches = [];
   if (intent.wantsBranches) {
-    branches = await findBranches(intent.cityHint);
+    branches = await findBranches(message, intent.cityHint);
   }
 
   // ── STEP 5b: Rank & assemble context ──────────────────────────────────
   const rankedFAQs = rankResults(faqMatches, message).slice(0, 3);
   const rankedCompany = rankResults(companyInfoMatches, message).slice(0, 3);
   const rankedProducts = rankResults(directProducts, message).slice(0, 5);
+  const rankedBranches = rankResults(branches, message).slice(0, 5);
 
   const contextData = {};
 
@@ -202,7 +203,8 @@ async function processMessage({ message, sessionId: providedSessionId, meta = {}
   }
 
   if (branches.length > 0) {
-    contextData.branches = branches.slice(0, 5).map(b => ({
+    const branchesForContext = rankedBranches.length > 0 ? rankedBranches : branches.slice(0, 5);
+    contextData.branches = branchesForContext.map(b => ({
       id: b.id, name: b.name, phone: b.phone, address: b.address,
       region: b.region, city: b.city, source_url: b.source_url,
     }));
