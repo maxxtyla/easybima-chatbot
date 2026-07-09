@@ -36,6 +36,22 @@ async function handleChat(req, res) {
 
     sessionId = result.sessionId;
 
+    if (result.humanHandled) {
+      // Agent has taken this session over — message is already logged for
+      // them to see; no bot reply to send. The widget should stop showing
+      // a typing indicator and start polling for the agent's reply.
+      return res.json({
+        response: null,
+        sessionId,
+        humanHandled: true,
+        session: {
+          isActive: true,
+          timeRemainingSeconds: Math.ceil(result.sessionStatus.timeRemainingMs / 1000),
+        },
+        timestamp: new Date().toISOString(),
+      });
+    }
+
     if (result.escalation) {
       return res.json({
         response: result.aiResponse,

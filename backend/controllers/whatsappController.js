@@ -123,6 +123,14 @@ async function handleWhatsAppWebhook(req, res) {
         },
       });
 
+      if (result.humanHandled) {
+        // Agent has taken this session over — the message is already
+        // logged for them to see in the ticket transcript. Stay silent
+        // here; the agent's reply goes out separately via
+        // ticketController.sendMessage -> sendWhatsAppMessage.
+        return;
+      }
+
       // Reactive warning fallback: if this message happened to land inside
       // the warning window before the periodic sweep in sessionManager
       // caught it, surface the notice right away instead of waiting up to

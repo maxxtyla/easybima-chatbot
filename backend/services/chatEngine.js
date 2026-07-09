@@ -25,6 +25,7 @@ const {
   archiveExpiredConversation,
 } = require('./conversationService');
 const { buildEscalationResponse } = require('../utils/responseBuilder');
+const { createTicket, isSessionHandedOff } = require('./ticketService');
 const {
   searchFAQ,
   getRecommendation,
@@ -106,9 +107,33 @@ async function processMessage({ message, sessionId: providedSessionId, meta = {}
     timestamp: new Date().toISOString(),
   });
 
+  // ── STEP 3.5: Human handoff check ──────────────────────────────────────
+  // If an agent has already taken over this session's ticket, the bot goes
+  // silent from here on: the customer's message is still logged above so
+  // the agent sees it live in the ticket transcript, but we skip
+  // escalation/RAG/Claude entirely and hand control back to the caller
+  // (chatControllerV2 / whatsappController) to not send a bot reply.
+  const handedOff = await isSessionHandedOff(sessionId);
+  if (handedOff) {
+    await logAnalytics(sessionId, 'human_handled_message', {
+      timestamp: new Date().toISOString(),
+    }).catch(() => {});
+
+    return {
+      sessionId,
+      aiResponse: null,
+      isNewSession,
+      escalation: false,
+      humanHandled: true,
+      sentiment: null,
+      sessionStatus: checkSessionStatus(sessionId),
+    };
+  }
+
   // ── STEP 4: Escalation & sentiment check ──────────────────────────────
   const needsEscalation = checkEscalationTriggers(message);
   const sentiment = detectSentiment(message);
+console.log(`🚨 [Escalation check] "${message}" → needsEscalation=${needsEscalation}, sentiment=${sentiment}`);
 
   if (needsEscalation || sentiment === 'angry') {
     await logAnalytics(sessionId, 'escalation_requested', {
@@ -119,23 +144,53 @@ async function processMessage({ message, sessionId: providedSessionId, meta = {}
 
     const escalation = buildEscalationResponse();
 
+    // Turn the escalation into something a human agent can actually act
+    // on, instead of just telling the customer to call in. Ticket
+    // creation failures must never block the chat reply itself — the
+    // customer still gets CIC's phone/email either way, they just won't
+    // get a reference number if this fails.
+    let ticketNumber = null;
+    try {
+      const channel = meta.channel === 'whatsapp' ? 'whatsapp' : 'web';
+      const customerPhone = channel === 'whatsapp' ? sessionId.replace(/^whatsapp:/, '') : null;
+
+      const ticket = await createTicket({
+        sessionId,
+        channel,
+        triggerMessage: message,
+        sentiment,
+        source: needsEscalation ? 'user_requested' : 'auto_escalation',
+        customerPhone,
+        customerName: meta.profileName || null,
+      });
+      ticketNumber = ticket.ticket_number;
+    } catch (ticketError) {
+      console.error('❌ Failed to create ticket for escalation:', ticketError.message);
+    }
+
+    const escalationResponse = ticketNumber
+      ? `${escalation.response}\n\nYour reference number is *${ticketNumber}* — please quote this when you contact us.`
+      : escalation.response;
+
     // Persist the escalation reply too, so history stays consistent
     // across channels and a follow-up message has the right context.
     const updatedHistory = [
       ...history,
       { role: 'user', content: message },
-      { role: 'assistant', content: escalation.response },
+      { role: 'assistant', content: escalationResponse },
     ];
-    await logMessage(sessionId, 'assistant', escalation.response, {
+    await logMessage(sessionId, 'assistant', escalationResponse, {
       processingTimeMs: Date.now() - startTime,
       escalation: true,
+      ticketNumber,
     });
 
     return {
       sessionId,
-      aiResponse: escalation.response,
+      aiResponse: escalationResponse,
       isNewSession,
       escalation: true,
+      ticketNumber,
       sentiment,
       sessionStatus: checkSessionStatus(sessionId),
       suggestions: ['Find a branch', 'Contact customer care', 'File a complaint'],
@@ -245,7 +300,15 @@ async function processMessage({ message, sessionId: providedSessionId, meta = {}
   }
 
   // ── STEP 6: AI response ────────────────────────────────────────────────
-  const rawAiResponse = await getClaudeResponse(message, history, contextData);
+  // History can contain role='agent' rows from a since-closed handoff
+  // (see STEP 3.5) — OpenRouter only accepts user/assistant/system, so map
+  // those to 'assistant' for the LLM call only. The raw `history` (with
+  // the real 'agent' role intact) is still what gets persisted below and
+  // returned to callers, so the ticket transcript stays accurate.
+  const historyForLLM = history.map(msg =>
+    msg.role === 'agent' ? { ...msg, role: 'assistant' } : msg
+  );
+  const rawAiResponse = await getClaudeResponse(message, historyForLLM, contextData);
   const aiResponse = sanitizeForUser(rawAiResponse);
 
   if (!aiResponse) {

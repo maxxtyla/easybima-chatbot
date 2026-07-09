@@ -52,7 +52,8 @@ function buildNewSessionResponse(sessionId) {
 function buildEscalationResponse() {
   return {
     response:
-      "I understand you need extra assistance. Let me connect you with one of our specialists.\n\n" +
+      "I understand you need extra assistance. I've created a ticket and one of our specialists will pick it up and reply to you right here in this chat.\n\n" +
+      "If you'd rather reach us directly in the meantime:\n" +
       "📞 **Call us:** +254 20 2823000\n" +
       "📧 **Email:** info@cicinsurancegroup.com\n" +
       "🌐 **Website:** https://www.cicinsurancegroup.com\n\n" +

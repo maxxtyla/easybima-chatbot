@@ -11,6 +11,7 @@ interface MessageBubbleProps {
 
 export function MessageBubble({ message }: MessageBubbleProps) {
   const isUser = message.role === 'user'
+  const isAgent = message.role === 'agent'
 
   return (
     
@@ -20,10 +21,15 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         isUser ? 'justify-end' : 'justify-start'
       )}
     >
-      {/* Bima avatar — only shown on assistant messages */}
+      {/* Avatar — Bima for the bot, a distinct badge for a human agent */}
       {!isUser && (
-        <div className="flex-shrink-0 w-7 h-7 rounded-full bg-cic-red flex items-center justify-center mr-2 mt-1 self-start">
-          <span className="text-white text-xs font-bold">B</span>
+        <div
+          className={cn(
+            'flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center mr-2 mt-1 self-start',
+            isAgent ? 'bg-emerald-600' : 'bg-cic-red'
+          )}
+        >
+          <span className="text-white text-xs font-bold">{isAgent ? 'A' : 'B'}</span>
         </div>
       )}
 
@@ -32,9 +38,17 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           'max-w-[80%] px-4 py-3 shadow-chat-bubble',
           isUser
             ? 'bg-cic-red text-white rounded-t-bubble rounded-bl-bubble'
+            : isAgent
+            ? 'bg-emerald-50 text-gray-800 rounded-t-bubble rounded-br-bubble border border-emerald-200'
             : 'bg-white text-gray-800 rounded-t-bubble rounded-br-bubble border border-neutral-200'
         )}
       >
+        {isAgent && (
+          <span className="block text-[10px] uppercase tracking-wide font-semibold text-emerald-700 mb-1">
+            Live agent
+          </span>
+        )}
+
         {/* 
           FIX: was rendering `message.content` as raw text — bypassing 
           all markdown. Now delegates to MessageContent which runs the 

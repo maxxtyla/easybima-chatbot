@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Message, ChatState } from '@/types/chat';
 import { generateId } from '@/lib/utils';
-import { sendMessage, keepAliveSession, endSession } from '@/lib/api';
+import { sendMessage, keepAliveSession, endSession, getConversationHistory } from '@/lib/api';
 
 const STORAGE_KEY = 'cic-chat-session';
 
@@ -24,6 +24,17 @@ export function useChat() {
   });
 
   const wrapUpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Once a chat escalates (either the bot's own "let me connect you"
+  // reply, or a human already having taken the session over), we start
+  // polling the backend for the agent's replies — the widget has no
+  // websocket, so this is the pickup mechanism.
+  const [isEscalated, setIsEscalated] = useState(false);
+  // How many messages we've already reconciled from the backend transcript.
+  // Only rows beyond this index get rendered on each poll, and only if
+  // they're role 'agent' — user/assistant rows are already shown locally
+  // via addMessage() the moment they're sent/received.
+  const backendMessageCountRef = useRef(0);
 
   const clearWrapUpTimer = useCallback(() => {
     if (wrapUpTimerRef.current) {
@@ -54,7 +65,7 @@ export function useChat() {
     return () => clearInterval(interval);
   }, [state.sessionId]);
 
-  const addMessage = useCallback((role: 'user' | 'assistant', content: string) => {
+  const addMessage = useCallback((role: 'user' | 'assistant' | 'agent', content: string) => {
     const message: Message = {
       id: generateId(),
       role,
@@ -76,6 +87,47 @@ export function useChat() {
   }, [addMessage, clearWrapUpTimer]);
 
   useEffect(() => clearWrapUpTimer, [clearWrapUpTimer]);
+
+  const pollForAgentReplies = useCallback(async () => {
+    if (!state.sessionId) return;
+    try {
+      const convo = await getConversationHistory(state.sessionId);
+      const backendMessages: { role: string; content: string; timestamp?: string }[] = convo.messages || [];
+      if (backendMessages.length > backendMessageCountRef.current) {
+        const newOnes = backendMessages.slice(backendMessageCountRef.current);
+        newOnes
+          .filter((m) => m.role === 'agent')
+          .forEach((m) => addMessage('agent', m.content));
+        backendMessageCountRef.current = backendMessages.length;
+      }
+    } catch {
+      // Best-effort — a missed poll tick just gets caught by the next one
+    }
+  }, [state.sessionId, addMessage]);
+
+  // Poll every 4s for as long as the conversation is escalated/handed off.
+  // We fetch a fresh baseline count right when escalation starts (rather
+  // than trusting local state.messages.length) so the first poll doesn't
+  // re-render anything we've already shown.
+  useEffect(() => {
+    if (!isEscalated || !state.sessionId) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const convo = await getConversationHistory(state.sessionId);
+        if (!cancelled) backendMessageCountRef.current = (convo.messages || []).length;
+      } catch {
+        // If this fails, the interval below will still catch up eventually
+      }
+    })();
+
+    const interval = setInterval(pollForAgentReplies, 4000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [isEscalated, state.sessionId, pollForAgentReplies]);
 
   const handleSendMessage = useCallback(
     async (userMessage: string) => {
@@ -103,13 +155,21 @@ export function useChat() {
         }
 
         // Render the AI response
-        if (response.escalation) {
+        if (response.humanHandled) {
+          // An agent has already taken this session over — the bot stays
+          // silent (no response.response to show). The poll effect above
+          // will pick up the agent's reply once they send one.
+          setIsEscalated(true);
+        } else if (response.escalation) {
           addMessage('assistant', response.response || "I'd like to connect you with a specialist.");
+          setIsEscalated(true);
         } else {
           addMessage('assistant', response.response);
         }
 
-        scheduleWrapUpPrompt();
+        // Skip the "anything else?" nudge once a human is in the loop —
+        // that's the agent's call to make, not the bot's.
+        if (!response.humanHandled) scheduleWrapUpPrompt();
 
       } catch (error: any) {
         if (error.status === 410) {
@@ -136,6 +196,8 @@ export function useChat() {
     clearWrapUpTimer();
     const newSessionId = generateId();
     localStorage.setItem(STORAGE_KEY, newSessionId);
+    backendMessageCountRef.current = 0;
+    setIsEscalated(false);
     setState((prev) => ({ ...prev, messages: [], sessionId: newSessionId }));
   }, [clearWrapUpTimer]);
 
@@ -156,6 +218,8 @@ export function useChat() {
     } finally {
       const newSessionId = generateId();
       localStorage.setItem(STORAGE_KEY, newSessionId);
+      backendMessageCountRef.current = 0;
+      setIsEscalated(false);
       setState((prev) => ({ ...prev, messages: [], sessionId: newSessionId }));
     }
   }, [state.sessionId, clearWrapUpTimer]);

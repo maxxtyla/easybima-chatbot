@@ -3,15 +3,19 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const dotenv = require('dotenv');
+const cookieParser = require('cookie-parser');
 
 
 
 const chatRoutesV2 = require('./routes/chatV2');
 const whatsappRoutes = require('./routes/whatsapp');
+const staffAuthRoutes = require('./routes/staffAuth');
+const ticketRoutes = require('./routes/tickets');
 
 const { startCleanupScheduler, stopCleanupScheduler } = require('./services/sessionManager');
 const { rateLimiter } = require('./middleware/rateLimiter');
 const { errorHandler } = require('./middleware/errorHandler');
+const { requireAgent } = require('./middleware/agentAuth');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -33,7 +37,7 @@ app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
     ? ['https://cicinsurancegroup.com', 'https://www.cicinsurancegroup.com'] 
     : ['http://localhost:3000', 'http://localhost:5173'],
-  methods: ['GET', 'POST'],
+  methods: ['GET', 'POST', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
 }));
@@ -41,6 +45,7 @@ app.use(cors({
 // Body parsing
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(cookieParser());
 
 // Rate limiting
 app.use(rateLimiter);
@@ -58,6 +63,8 @@ app.get('/health', (req, res) => {
 // API routes
 app.use('/api/chat', chatRoutesV2);
 app.use('/api/whatsapp', whatsappRoutes);
+app.use('/api/staff/auth', staffAuthRoutes);
+app.use('/api/staff/tickets', requireAgent, ticketRoutes);
 
 // 404 handler
 app.use((req, res) => {
