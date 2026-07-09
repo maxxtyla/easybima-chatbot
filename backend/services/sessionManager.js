@@ -193,13 +193,19 @@ async function getConversationWithExpirationCheck(sessionId) {
     }
 
     const conv = result.rows[0];
+    // Backstop cap, independent of anything upstream getting expiry/archival
+    // wrong: even for a legitimately long-running session, claudeService
+    // only ever uses the last 8 messages, so there's no reason to ever
+    // pull more than a small multiple of that back from the DB.
     const messagesResult = await pool.query(
       `SELECT id, role, content, created_at
        FROM messages
        WHERE session_id = $1
-       ORDER BY created_at ASC`,
+       ORDER BY created_at DESC
+       LIMIT 20`,
       [sessionId]
     );
+    messagesResult.rows.reverse(); // restore chronological order
 
     return {
       sessionId,

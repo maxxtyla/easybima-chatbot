@@ -208,6 +208,44 @@ async function deleteConversationData(sessionId) {
   }
 }
 
+/**
+ * Clears a session's message history when it has genuinely timed out from
+ * inactivity (as opposed to the user explicitly ending it — see
+ * deleteConversationData above).
+ *
+ * WhatsApp sessionIds are the user's phone number and are permanent, so
+ * without this, "session expired, reinitializing" only reset the in-memory
+ * expiry timer — the old messages row never went away, and the next
+ * "fresh" message would silently pull the entire prior conversation back
+ * into the Claude prompt via getConversationWithExpirationCheck().
+ *
+ * Messages are deleted (not just flagged) to keep behavior consistent with
+ * deleteConversationData and saveConversation, which already treat
+ * `messages` as the disposable, session-scoped table. The conversation row
+ * itself is kept and stamped with when/why it was archived, so there's
+ * still a lightweight audit trail without retaining old chat content.
+ */
+async function archiveExpiredConversation(sessionId) {
+  try {
+    await pool.query('DELETE FROM messages WHERE session_id = $1', [sessionId]);
+
+    await pool.query(
+      `UPDATE conversations
+       SET metadata = jsonb_set(COALESCE(metadata, '{}'), '{expiredArchivedAt}', to_jsonb(NOW()::text)),
+           updated_at = NOW()
+       WHERE session_id = $1`,
+      [sessionId]
+    );
+
+    return true;
+  } catch (error) {
+    console.error('Error archiving expired conversation:', error);
+    // Non-fatal: worst case a stale message or two leaks into the next
+    // prompt, same as today. Don't block the new session from starting.
+    return false;
+  }
+}
+
 module.exports = {
   getConversation,
   saveConversation,
@@ -216,4 +254,5 @@ module.exports = {
   generateSessionId,
   clearExpiredSessions,
   deleteConversationData,
+  archiveExpiredConversation,
 };

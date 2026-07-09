@@ -17,7 +17,13 @@ const {
   recoverSessionFromDB,
   getConversationWithExpirationCheck,
 } = require('./sessionManager');
-const { logMessage, logAnalytics, generateSessionId, saveConversation } = require('./conversationService');
+const {
+  logMessage,
+  logAnalytics,
+  generateSessionId,
+  saveConversation,
+  archiveExpiredConversation,
+} = require('./conversationService');
 const { buildEscalationResponse } = require('../utils/responseBuilder');
 const {
   searchFAQ,
@@ -70,6 +76,14 @@ async function processMessage({ message, sessionId: providedSessionId, meta = {}
           reason: 'inactivity_or_restart',
           timestamp: new Date().toISOString(),
         }).catch(() => {});
+
+        // IMPORTANT: sessionId is permanent for WhatsApp (it's the phone
+        // number), so a "truly expired" session must actually clear its old
+        // message rows here — otherwise initializeSession() below only
+        // resets the in-memory expiry timer, and the very next
+        // getConversationWithExpirationCheck() call still pulls the entire
+        // prior conversation back in, defeating the point of expiry.
+        await archiveExpiredConversation(sessionId).catch(() => {});
 
         isNewSession = true;
         await initializeSession(sessionId);
