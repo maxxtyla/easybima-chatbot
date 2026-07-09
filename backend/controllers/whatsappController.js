@@ -9,10 +9,29 @@
 
 const chatEngine = require('../services/chatEngine');
 const { sendWhatsAppMessage } = require('../services/whatsappService');
-const { logAnalytics } = require('../services/conversationService');
+const { logAnalytics, deleteConversationData } = require('../services/conversationService');
+const { endSessionInMemory } = require('../services/sessionManager');
+const { markPendingEnd, isPendingEnd, clearPendingEnd } = require('../services/whatsappSessionState');
 const twilio = require('twilio');
 
 const { MessagingResponse } = twilio.twiml;
+
+// ── End-chat intent detection ────────────────────────────────────────────
+// Whole-message match on purpose (not "includes") so a real question like
+// "how do I cancel my policy" or "goodbye, when is your call center open"
+// doesn't get misread as a request to end the conversation.
+const END_CHAT_PATTERN = /^(end chat|end conversation|end session|close chat|stop|cancel|bye|goodbye|quit|exit)[.!]?$/i;
+const AFFIRMATIVE_PATTERN = /^(yes|y|yep|yeah|confirm|confirmed|sure|ok|okay)[.!]?$/i;
+
+function buildEndConfirmationPrompt() {
+  return "Are you sure you want to end this conversation? This will clear your chat history.\n\n" +
+    "Reply *YES* to confirm, or just send your next message to keep chatting.";
+}
+
+function buildEndedMessage() {
+  return "✅ Your conversation has been ended and the chat history cleared.\n\n" +
+    "Send me a message anytime to start a new conversation!";
+}
 
 async function handleWhatsAppWebhook(req, res) {
   // Twilio sends these as application/x-www-form-urlencoded fields.
@@ -64,6 +83,35 @@ async function handleWhatsAppWebhook(req, res) {
 
   (async () => {
     try {
+      // ── End-chat confirmation flow ───────────────────────────────────
+      // Handled entirely outside chatEngine (no RAG/Claude call needed)
+      // since it's pure session bookkeeping, not a question to answer.
+      if (isPendingEnd(sessionId)) {
+        clearPendingEnd(sessionId);
+
+        if (AFFIRMATIVE_PATTERN.test(message)) {
+          await logAnalytics(sessionId, 'session_ended_by_user', {
+            channel: 'whatsapp',
+            timestamp: new Date().toISOString(),
+          }).catch(() => {});
+
+          await deleteConversationData(sessionId);
+          endSessionInMemory(sessionId);
+
+          await sendWhatsAppMessage(sessionId, buildEndedMessage());
+          return;
+        }
+
+        // Anything other than an explicit "yes" cancels the end request.
+        // Don't just say "okay, continuing" and drop their message — if
+        // they typed a real question instead of "no", it still deserves
+        // an answer, so fall through to the normal pipeline below.
+      } else if (END_CHAT_PATTERN.test(message)) {
+        markPendingEnd(sessionId);
+        await sendWhatsAppMessage(sessionId, buildEndConfirmationPrompt());
+        return;
+      }
+
       const result = await chatEngine.processMessage({
         message,
         sessionId,
@@ -75,7 +123,17 @@ async function handleWhatsAppWebhook(req, res) {
         },
       });
 
-      await sendWhatsAppMessage(sessionId, result.aiResponse);
+      // Reactive warning fallback: if this message happened to land inside
+      // the warning window before the periodic sweep in sessionManager
+      // caught it, surface the notice right away instead of waiting up to
+      // 60s for the next sweep tick.
+      let outgoing = result.aiResponse;
+      if (result.sessionStatus?.warningNeeded) {
+        const minutesLeft = Math.max(1, Math.round(result.sessionStatus.timeRemainingMs / 60000));
+        outgoing += `\n\n⏰ _This conversation will time out in about ${minutesLeft} minute${minutesLeft === 1 ? '' : 's'} due to inactivity. Reply *end chat* to close it now, or just keep chatting._`;
+      }
+
+      await sendWhatsAppMessage(sessionId, outgoing);
 
     } catch (error) {
       console.error('❌ WhatsApp handler error:', error);

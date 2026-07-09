@@ -1,4 +1,5 @@
 const { pool } = require('../config/database');
+const { EventEmitter } = require('events');
 
 // ─── Configuration ───────────────────────────────────────────────────────────
 const SESSION_CONFIG = {
@@ -6,6 +7,21 @@ const SESSION_CONFIG = {
   WARNING_THRESHOLD_MS: 2 * 60 * 1000,  // Warn at 2 minutes remaining
   CLEANUP_INTERVAL_MS: 60 * 1000,       // Sweep every 60 seconds
 };
+
+// ─── sessionEvents ────────────────────────────────────────────────────────────
+// Lets channels without client-side polling (WhatsApp — there's no JS
+// running on a phone to call keep-alive/poll status) proactively tell a user
+// "you're about to time out" / "you've timed out", instead of only finding
+// out reactively on their next message. The web widget doesn't need this (it
+// already polls via keep-alive and reads `warning` off each chat response),
+// so it simply never subscribes.
+//
+// Emitted only from the periodic sweep in cleanupExpiredSessions() below,
+// NOT from the reactive checkSessionStatus() hot path — emitting there too
+// would give a user whose message happens to land exactly as their session
+// expires a redundant notice on top of the normal fresh-session reply
+// chatEngine already sends them.
+const sessionEvents = new EventEmitter();
 
 // In-memory index of active sessions for fast lookups.
 // Shape: { sessionId -> { expiryTime, warningShown, createdAt, lastActivityAt } }
@@ -207,9 +223,17 @@ async function cleanupExpiredSessions() {
     let cleaned = 0;
 
     for (const [sessionId, session] of activeSessions.entries()) {
-      if (session.expiryTime <= now) {
+      const timeRemainingMs = session.expiryTime - now;
+
+      if (timeRemainingMs <= 0) {
         activeSessions.delete(sessionId);
         cleaned++;
+        // Idle timeout nobody was polling for — proactively let a
+        // channel-specific listener (WhatsApp) tell the user.
+        sessionEvents.emit('expired', sessionId);
+      } else if (timeRemainingMs <= SESSION_CONFIG.WARNING_THRESHOLD_MS && !session.warningShown) {
+        activeSessions.set(sessionId, { ...session, warningShown: true });
+        sessionEvents.emit('warning', sessionId, timeRemainingMs);
       }
     }
 
@@ -274,4 +298,5 @@ module.exports = {
   stopCleanupScheduler,
   getSessionStats,
   endSessionInMemory,            // ← new export
+  sessionEvents,                 // new export: warning/expired events for proactive channel notifications
 };

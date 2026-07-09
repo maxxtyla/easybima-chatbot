@@ -9,13 +9,14 @@ function buildChatResponse({ response, sessionId, sessionStatus }) {
     },
   };
 
-  // Add warning if session is expiring soon (< 2 minutes)
+  // Nudge toward wrapping up when the session is getting close to timing
+  // out — phrased as a natural closing question, not "your session is
+  // about to expire" technical/alarming language.
   if (sessionStatus.timeRemainingMs < 120000 && sessionStatus.timeRemainingMs > 0) {
     result.warning = {
-      type: 'session_expiring_soon',
-      message: 'Your session will expire soon due to inactivity.',
+      type: 'wrap_up_prompt',
+      message: 'Is there anything else I can help you with?',
       timeRemainingSeconds: Math.ceil(sessionStatus.timeRemainingMs / 1000),
-      action: 'Send a message or click keep-alive to continue',
     };
   }
 
@@ -24,7 +25,7 @@ function buildChatResponse({ response, sessionId, sessionStatus }) {
 
 function buildSessionExpiredResponse(sessionId) {
   return {
-    response: "Your session has expired due to inactivity. I've started a fresh conversation — how can I help you?",
+    response: "Hi! I'm Bima, your CIC Insurance assistant. How can I help you today?",
     sessionId,
     timestamp: new Date().toISOString(),
     session: {
