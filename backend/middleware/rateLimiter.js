@@ -1,5 +1,7 @@
 const rateLimit = require('express-rate-limit');
 
+// STRICT limiter for unauthenticated public endpoints
+// Protects against abuse but keeps limits reasonable
 const rateLimiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 60 * 1000, // 1 minute
   max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 30,
@@ -10,11 +12,72 @@ const rateLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => req.path.startsWith('/api/whatsapp'),
-  keyGenerator: (req) => {
-    // Use IP address + session ID if available for more granular limiting
-    return req.ip || req.connection.remoteAddress || 'unknown';
+  // Staff dashboard traffic gets its own, agent-keyed limiter (see
+  // staffRateLimiter below) applied after requireAgent — skip it here so
+  // authenticated staff requests aren't ALSO counted against the public
+  // per-IP bucket (that double-counting was the root cause of staff
+  // seeing "rate limit exceeded" errors).
+  skip: (req) => req.path.startsWith('/api/staff'),
+  keyGenerator: (req) => req.ip || req.connection.remoteAddress || 'unknown',
+  handler: (req, res, next, options) => {
+    res.status(429).json(options.message);
   },
+});
+
+// LENIENT limiter for chat endpoints
+// Session-based rate limiting allows conversations to flow naturally
+// without hitting rate limits from rapid back-and-forth messages
+const chatRateLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 100, // 100 messages per minute per session is very generous
+  message: {
+    error: 'Too many requests',
+    message: 'Too many messages. Please slow down.',
+    code: 'CHAT_RATE_LIMIT_EXCEEDED'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => {
+    // Skip for WhatsApp webhooks (they come from shared Twilio IPs)
+    if (req.path.startsWith('/api/whatsapp')) return true;
+    return false;
+  },
+  keyGenerator: (req) => {
+    // Use session ID for chat endpoints to rate limit per conversation
+    // Falls back to IP if no session provided
+    return req.body?.sessionId || req.ip || req.connection.remoteAddress || 'unknown';
+  },
+  handler: (req, res, next, options) => {
+    res.status(429).json(options.message);
+  },
+});
+
+// LENIENT limiter for the staff dashboard (agent-facing, authenticated).
+// BUG FIX: staff/customer-management traffic was previously falling under
+// the generic public `rateLimiter` below (30 req/min per IP), because
+// `/api/staff/tickets` is mounted AFTER `app.use(rateLimiter)` in
+// server.js. That limiter was designed for anonymous public traffic, but
+// the staff dashboard polls the ticket queue every 30s AND polls an open
+// ticket's live transcript every 5s (~12 req/min just for one open
+// ticket) — and multiple agents in the same office share one outbound IP,
+// so their requests all counted against the SAME 30/min bucket. That's
+// exactly what produced the "you have exceeded the rate limit" errors in
+// staff customer management.
+//
+// Fix: give staff endpoints their own, much more generous limiter, keyed
+// by the authenticated agent's id (not shared IP) so agents never throttle
+// each other. This must be mounted AFTER requireAgent so req.agent exists.
+const staffRateLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: parseInt(process.env.STAFF_RATE_LIMIT_MAX) || 300,
+  message: {
+    error: 'Too many requests',
+    message: 'Too many requests from the staff dashboard. Please slow down.',
+    code: 'STAFF_RATE_LIMIT_EXCEEDED',
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.agent?.sub || req.ip || req.connection.remoteAddress || 'unknown',
   handler: (req, res, next, options) => {
     res.status(429).json(options.message);
   },
@@ -51,4 +114,4 @@ const whatsappRateLimiter = rateLimit({
   },
 });
 
-module.exports = { rateLimiter, strictRateLimiter, whatsappRateLimiter };
+module.exports = { rateLimiter, chatRateLimiter, strictRateLimiter, whatsappRateLimiter, staffRateLimiter };

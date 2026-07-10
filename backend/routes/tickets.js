@@ -39,6 +39,14 @@ router.patch('/:id/status', ticketController.updateStatus);
 router.patch('/:id/priority', ticketController.updatePriority);
 
 /**
+ * PATCH /api/staff/tickets/:id/accept
+ * Self-service: the signed-in agent accepts this ticket for themselves.
+ * Open to any agent (unlike /assign below) — this is the "agent must
+ * accept before they can start typing" gate on the ticket detail page.
+ */
+router.patch('/:id/accept', ticketController.accept);
+
+/**
  * PATCH /api/staff/tickets/:id/assign  Body: { agentId }
  * Restricted to supervisor/admin — line agents shouldn't reassign each
  * other's queues; they can still pick up unassigned tickets via this

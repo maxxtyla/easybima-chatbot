@@ -14,7 +14,8 @@ export function ChatWidget() {
   // Lifted up from ChatWindow so this component can decide whether closing
   // needs confirmation (i.e. is there an active conversation to lose?).
   const chat = useChat()
-  const hasActiveConversation = chat.messages.length > 0
+  const hasOpenTicket = !!chat.ticketNumber && !['resolved', 'closed'].includes(chat.ticketStatus || 'open')
+  const hasActiveConversation = chat.messages.length > 0 || hasOpenTicket
 
   // Clicking the X (or the floating launcher while open) goes through here
   // rather than closing immediately. An empty conversation closes right

@@ -302,16 +302,53 @@ async function getClaudeResponse(
 }
 
 /**
- * Check if message contains escalation triggers
+ * Check if message contains escalation triggers.
+ *
+ * BUG FIX: the previous keyword list only covered a couple of exact
+ * phrasings ("speak to agent", "speak with agent"), so common variants
+ * like "talk to agent", "can I talk to an agent", "connect me to a
+ * human", "let me speak to someone" etc. never matched. When that
+ * happened, chatEngine.js skipped its escalation branch entirely (no
+ * ticket created) and the message fell through to the normal AI
+ * pipeline — where the system prompt's OWN, separate escalation
+ * instructions kicked in and made Claude *say* "let me connect you"
+ * without any ticket ever being created. That mismatch between what the
+ * system prompt promises and what this function actually detects was
+ * the root cause of "sometimes a ticket isn't created when a user asks
+ * for an agent".
+ *
+ * Fix: broaden this to a) more exact-phrase keywords, and b) a pattern
+ * that catches "(talk/speak/chat/connect) (to/with) ... (agent/human/
+ * person/rep/representative/specialist/support/someone)" regardless of
+ * small wording differences in between (e.g. "can i talk to an agent").
  */
 function checkEscalationTriggers(message) {
+  const lowerMessage = (message || '').toLowerCase();
+
+  // Exact-phrase keywords — safe as plain substring checks.
   const escalationKeywords = [
-    'speak to agent', 'speak with agent', 'human agent', 'customer service',
-    'complaint', 'dispute', 'escalate', 'manager', 'supervisor',
+    'speak to agent', 'speak with agent', 'speak to an agent', 'speak with an agent',
+    'talk to agent', 'talk with agent', 'talk to an agent', 'talk with an agent',
+    'chat with agent', 'chat with an agent',
+    'human agent', 'live agent', 'live support', 'live chat',
+    'real person', 'actual person', 'human being', 'human please',
+    'talk to a human', 'speak to a human', 'talk to someone', 'speak to someone',
+    'speak with someone', 'talk with someone', 'connect me',
+    'customer service', 'customer care agent', 'representative',
+    'complaint', 'dispute', 'escalate', 'escalation',
+    'manager', 'supervisor',
     'help me please', 'urgent', 'asap', 'emergency',
+    'i want a person', 'i want to talk to a person',
   ];
-  const lowerMessage = message.toLowerCase();
-  return escalationKeywords.some(keyword => lowerMessage.includes(keyword));
+
+  if (escalationKeywords.some(keyword => lowerMessage.includes(keyword))) {
+    return true;
+  }
+
+  // Pattern fallback for phrasing not covered above, e.g. "can i talk to
+  // an agent", "please connect me with a representative".
+  const escalationPattern = /\b(talk|speak|chat|connect)\b[\s\w]{0,20}\b(agent|human|person|rep|representative|specialist|support|someone|somebody)\b/i;
+  return escalationPattern.test(lowerMessage);
 }
 
 /**

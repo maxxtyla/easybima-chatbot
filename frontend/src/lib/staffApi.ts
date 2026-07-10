@@ -130,6 +130,13 @@ export async function assignTicket(id: string, agentId: string): Promise<{ ticke
   return staffFetch(`/staff/tickets/${id}/assign`, { method: 'PATCH', body: JSON.stringify({ agentId }) });
 }
 
+// Self-service accept: the signed-in agent takes this ticket for
+// themselves. Must happen before sendTicketMessage will succeed — the
+// backend enforces this too (see ticketService.sendAgentMessage's guard).
+export async function acceptTicket(id: string): Promise<{ ticket: Ticket }> {
+  return staffFetch(`/staff/tickets/${id}/accept`, { method: 'PATCH' });
+}
+
 export async function addTicketNote(id: string, note: string): Promise<{ success: boolean }> {
   return staffFetch(`/staff/tickets/${id}/notes`, { method: 'POST', body: JSON.stringify({ note }) });
 }

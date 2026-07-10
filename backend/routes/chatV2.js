@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { handleChat, getConversationHistory, keepAliveSession, endSession } = require('../controllers/chatControllerV2');
+const { handleChat, getConversationHistory, keepAliveSession, endSession, getTicketStatus, closeTicket } = require('../controllers/chatControllerV2');
 const { validateInput } = require('../middleware/validateInput');
 
 /**
@@ -80,6 +80,19 @@ router.post('/keep-alive', keepAliveSession);
  * }
  */
 router.post('/end-session', endSession);
+
+/**
+ * GET /api/chat/ticket/:sessionId
+ * Poll for ticket state (agent accepted / status changed) without needing
+ * to send a chat message first. See chatControllerV2.getTicketStatus.
+ */
+router.get('/ticket/:sessionId', getTicketStatus);
+
+/**
+ * POST /api/chat/ticket/close  Body: { sessionId }
+ * Customer closes their own open ticket from the widget's ticket card.
+ */
+router.post('/ticket/close', closeTicket);
 
 /**
  * GET /api/chat/health

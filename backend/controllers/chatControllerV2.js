@@ -6,12 +6,13 @@ const {
   updateSessionActivity,
   endSessionInMemory,
 } = require('../services/sessionManager');
-const { logAnalytics, deleteConversationData } = require('../services/conversationService');
+const { logAnalytics, deleteConversationData, logMessage } = require('../services/conversationService');
 const {
   buildChatResponse,
   buildSessionExpiredResponse,
   buildErrorResponse,
 } = require('../utils/responseBuilder');
+const { getActiveTicketWithAgent, closeTicketByCustomer } = require('../services/ticketService');
 
 /**
  * POST /api/chat
@@ -22,6 +23,8 @@ const {
 async function handleChat(req, res) {
   const { message, sessionId: providedSessionId } = req.body;
   let sessionId = providedSessionId;
+
+  console.log(`📨 [CHAT] Incoming message - sessionId: ${providedSessionId}, msg length: ${message?.length}`);
 
   try {
     const result = await chatEngine.processMessage({
@@ -37,6 +40,7 @@ async function handleChat(req, res) {
     sessionId = result.sessionId;
 
     if (result.humanHandled) {
+      console.log(`✅ [CHAT] HUMAN HANDLED - ticketNumber: ${result.ticketNumber}, agent: ${result.assignedAgent?.name}`);
       // Agent has taken this session over — message is already logged for
       // them to see; no bot reply to send. The widget should stop showing
       // a typing indicator and start polling for the agent's reply.
@@ -44,6 +48,10 @@ async function handleChat(req, res) {
         response: null,
         sessionId,
         humanHandled: true,
+        ticketNumber: result.ticketNumber || null,
+        ticketStatus: result.ticketStatus || 'open',
+        ticketCreatedAt: result.ticketCreatedAt || null,
+        assignedAgent: result.assignedAgent || null,
         session: {
           isActive: true,
           timeRemainingSeconds: Math.ceil(result.sessionStatus.timeRemainingMs / 1000),
@@ -53,11 +61,16 @@ async function handleChat(req, res) {
     }
 
     if (result.escalation) {
+      console.log(`🚨 [CHAT] ESCALATION - ticketNumber: ${result.ticketNumber}`);
       return res.json({
         response: result.aiResponse,
         sessionId,
         escalation: true,
         sentiment: result.sentiment,
+        ticketNumber: result.ticketNumber || null,
+        ticketStatus: result.ticketStatus || 'open',
+        ticketCreatedAt: result.ticketCreatedAt || null,
+        assignedAgent: result.assignedAgent || null,
         session: {
           isActive: true,
           timeRemainingSeconds: Math.ceil(result.sessionStatus.timeRemainingMs / 1000),
@@ -199,4 +212,82 @@ async function endSession(req, res) {
   }
 }
 
-module.exports = { handleChat, getConversationHistory, keepAliveSession, endSession };
+/**
+ * GET /api/chat/ticket/:sessionId
+ *
+ * Lightweight polling endpoint so the widget can pick up ticket state
+ * changes (an agent accepting the ticket, an agent closing/resolving it,
+ * etc.) that happen on the staff side without the customer needing to send
+ * a new message first. The main POST /api/chat response already carries
+ * this info as a side effect of a chat turn — this lets the frontend refresh
+ * it independently, e.g. every few seconds while a ticket is open.
+ */
+async function getTicketStatus(req, res) {
+  const { sessionId } = req.params;
+  try {
+    if (!sessionId) {
+      return res.status(400).json({ error: 'missing_session_id', message: 'sessionId is required' });
+    }
+
+    const ticket = await getActiveTicketWithAgent(sessionId);
+
+    return res.json({
+      hasActiveTicket: !!ticket,
+      ticketNumber: ticket?.ticket_number || null,
+      ticketStatus: ticket?.status || null,
+      ticketCreatedAt: ticket?.created_at ? new Date(ticket.created_at).toISOString() : null,
+      assignedAgent: ticket && ticket.assigned_to
+        ? { id: ticket.assigned_to, name: ticket.assigned_agent_name }
+        : null,
+    });
+  } catch (error) {
+    console.error('Error fetching ticket status:', error);
+    return res.status(500).json(buildErrorResponse(error, sessionId));
+  }
+}
+
+/**
+ * POST /api/chat/ticket/close  Body: { sessionId }
+ *
+ * Customer-initiated close from the "Close ticket" button on the widget's
+ * ticket card. Scoped by sessionId (not a raw ticket id) so a customer can
+ * only ever close their own session's ticket. Permanent — matches the
+ * requested UX of the customer being able to close it themselves and have
+ * it stay closed.
+ */
+async function closeTicket(req, res) {
+  const { sessionId } = req.body;
+  try {
+    if (!sessionId) {
+      return res.status(400).json({ error: 'missing_session_id', message: 'sessionId is required' });
+    }
+
+    const ticket = await closeTicketByCustomer(sessionId);
+    if (!ticket) {
+      return res.status(404).json({ error: 'not_found', message: 'No open ticket found for this session.' });
+    }
+
+    // Best-effort transcript note — non-fatal if it fails, the ticket is
+    // already closed either way.
+    await logMessage(sessionId, 'system', 'Customer closed the ticket.', {
+      ticketId: ticket.id,
+    }).catch(() => {});
+
+    await logAnalytics(sessionId, 'ticket_closed_by_customer', {
+      ticketId: ticket.id,
+      ticketNumber: ticket.ticket_number,
+      timestamp: new Date().toISOString(),
+    }).catch(() => {});
+
+    return res.json({
+      success: true,
+      ticketNumber: ticket.ticket_number,
+      ticketStatus: ticket.status,
+    });
+  } catch (error) {
+    console.error('Error closing ticket:', error);
+    return res.status(500).json(buildErrorResponse(error, sessionId));
+  }
+}
+
+module.exports = { handleChat, getConversationHistory, keepAliveSession, endSession, getTicketStatus, closeTicket };

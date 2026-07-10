@@ -8,6 +8,7 @@ import {
   getTicketEvents,
   updateTicketStatus,
   updateTicketPriority,
+  acceptTicket,
   addTicketNote,
   sendTicketMessage,
   getMe,
@@ -56,6 +57,7 @@ export default function TicketDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
   const [isSendingReply, setIsSendingReply] = useState(false);
+  const [isAccepting, setIsAccepting] = useState(false);
   const [deliveryWarning, setDeliveryWarning] = useState<string | null>(null);
 
   const loadTicket = useCallback(async () => {
@@ -122,6 +124,21 @@ export default function TicketDetailPage() {
       setError(err instanceof Error ? err.message : 'Failed to send message.');
     } finally {
       setIsSendingReply(false);
+    }
+  }
+
+  async function handleAcceptTicket() {
+    if (!ticket || isAccepting) return;
+    setIsAccepting(true);
+    setError(null);
+    try {
+      const { ticket: updated } = await acceptTicket(ticket.id);
+      setTicket(updated);
+      loadTicket();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to accept ticket.');
+    } finally {
+      setIsAccepting(false);
     }
   }
 
@@ -236,39 +253,75 @@ export default function TicketDetailPage() {
             })}
           </div>
 
-          {ticket && !TERMINAL_STATUSES.includes(ticket.status) ? (
-            <div className="mt-4 border-t border-neutral-100 pt-3">
-              {deliveryWarning && (
-                <p className="text-xs text-orange-700 bg-orange-50 rounded-md px-3 py-2 mb-2">{deliveryWarning}</p>
-              )}
-              <div className="flex gap-2">
-                <textarea
-                  value={replyText}
-                  onChange={(e) => setReplyText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSendReply();
-                    }
-                  }}
-                  rows={2}
-                  placeholder="Reply to the customer…"
-                  className="flex-1 rounded-lg border border-neutral-300 px-3 py-2 text-sm resize-none"
-                />
-                <button
-                  onClick={handleSendReply}
-                  disabled={isSendingReply || !replyText.trim()}
-                  className="self-end rounded-lg bg-cic-red text-white text-sm px-4 py-2 disabled:opacity-50"
-                >
-                  {isSendingReply ? 'Sending…' : 'Send'}
-                </button>
+          {(() => {
+            if (!ticket) return null;
+
+            if (TERMINAL_STATUSES.includes(ticket.status)) {
+              return (
+                <p className="mt-4 border-t border-neutral-100 pt-3 text-xs text-neutral-400">
+                  This ticket is {ticket.status} — reopen it to reply again.
+                </p>
+              );
+            }
+
+            const acceptedByOther = !!ticket.assigned_to && ticket.assigned_to !== agent?.sub;
+            const hasAccepted = ticket.assigned_to === agent?.sub && ticket.status !== 'open';
+
+            if (acceptedByOther) {
+              return (
+                <p className="mt-4 border-t border-neutral-100 pt-3 text-xs text-neutral-500">
+                  This ticket has already been accepted by {ticket.assigned_agent_name || 'another agent'}.
+                </p>
+              );
+            }
+
+            if (!hasAccepted) {
+              return (
+                <div className="mt-4 border-t border-neutral-100 pt-3">
+                  <p className="text-xs text-neutral-500 mb-2">
+                    Accept this ticket to start replying to the customer.
+                  </p>
+                  <button
+                    onClick={handleAcceptTicket}
+                    disabled={isAccepting}
+                    className="w-full rounded-lg bg-cic-red text-white text-sm py-2 font-medium disabled:opacity-50"
+                  >
+                    {isAccepting ? 'Accepting…' : 'Accept ticket'}
+                  </button>
+                </div>
+              );
+            }
+
+            return (
+              <div className="mt-4 border-t border-neutral-100 pt-3">
+                {deliveryWarning && (
+                  <p className="text-xs text-orange-700 bg-orange-50 rounded-md px-3 py-2 mb-2">{deliveryWarning}</p>
+                )}
+                <div className="flex gap-2">
+                  <textarea
+                    value={replyText}
+                    onChange={(e) => setReplyText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSendReply();
+                      }
+                    }}
+                    rows={2}
+                    placeholder="Reply to the customer…"
+                    className="flex-1 rounded-lg border border-neutral-300 px-3 py-2 text-sm resize-none"
+                  />
+                  <button
+                    onClick={handleSendReply}
+                    disabled={isSendingReply || !replyText.trim()}
+                    className="self-end rounded-lg bg-cic-red text-white text-sm px-4 py-2 disabled:opacity-50"
+                  >
+                    {isSendingReply ? 'Sending…' : 'Send'}
+                  </button>
+                </div>
               </div>
-            </div>
-          ) : (
-            <p className="mt-4 border-t border-neutral-100 pt-3 text-xs text-neutral-400">
-              This ticket is {ticket?.status} — reopen it to reply again.
-            </p>
-          )}
+            );
+          })()}
         </div>
 
         {/* Right: details + actions */}

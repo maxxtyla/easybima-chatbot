@@ -52,3 +52,37 @@ export async function getConversationHistory(sessionId: string) {
   if (!response.ok) throw new Error('Failed to fetch history');
   return response.json();
 }
+
+export interface TicketStatusResponse {
+  hasActiveTicket: boolean;
+  ticketNumber: string | null;
+  ticketStatus: string | null;
+  ticketCreatedAt: string | null;
+  assignedAgent: { id: string; name: string } | null;
+}
+
+// Lightweight poll used while a ticket is open so the widget picks up
+// staff-side changes (agent accepts, agent closes/resolves) even if the
+// customer hasn't sent a new message since.
+export async function getTicketStatus(sessionId: string): Promise<TicketStatusResponse> {
+  const response = await fetch(`${API_BASE}/chat/ticket/${sessionId}`);
+  if (!response.ok) throw new Error('Failed to fetch ticket status');
+  return response.json();
+}
+
+// Customer-initiated permanent close of their own open ticket.
+export async function closeTicket(sessionId: string): Promise<{ success: boolean; ticketNumber: string; ticketStatus: string }> {
+  const response = await fetch(`${API_BASE}/chat/ticket/close`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId }),
+  });
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    const error = new Error(body.message || 'Failed to close ticket') as any;
+    error.status = response.status;
+    throw error;
+  }
+  return response.json();
+}

@@ -95,6 +95,26 @@ async function assign(req, res, next) {
   }
 }
 
+/**
+ * PATCH /api/staff/tickets/:id/accept
+ * Self-service accept: any signed-in agent viewing an unaccepted ticket can
+ * take it. Moves the ticket to in_progress and self-assigns. Must happen
+ * before the agent is allowed to send a message (see sendMessage below and
+ * ticketService.sendAgentMessage's guard).
+ */
+async function accept(req, res, next) {
+  try {
+    const ticket = await ticketService.acceptTicket(req.params.id, req.agent.sub);
+    if (!ticket) return res.status(404).json({ error: 'Not Found', message: 'Ticket not found.' });
+    return res.json({ ticket });
+  } catch (error) {
+    if (error.code === 'ALREADY_ASSIGNED' || error.code === 'TICKET_CLOSED') {
+      return res.status(error.status || 409).json({ error: error.code, message: error.message });
+    }
+    return next(error);
+  }
+}
+
 async function addNote(req, res, next) {
   try {
     const { note } = req.body;
@@ -123,7 +143,15 @@ async function sendMessage(req, res, next) {
       return res.status(400).json({ error: 'Validation Error', message: 'content is required.' });
     }
 
-    const result = await ticketService.sendAgentMessage(req.params.id, req.agent.sub, content.trim());
+    let result;
+    try {
+      result = await ticketService.sendAgentMessage(req.params.id, req.agent.sub, content.trim());
+    } catch (sendError) {
+      if (['TICKET_CLOSED', 'NOT_ACCEPTED', 'ASSIGNED_TO_OTHER'].includes(sendError.code)) {
+        return res.status(sendError.status || 409).json({ error: sendError.code, message: sendError.message });
+      }
+      throw sendError;
+    }
     if (!result) return res.status(404).json({ error: 'Not Found', message: 'Ticket not found.' });
 
     if (result.ticket.channel === 'whatsapp') {
@@ -169,6 +197,7 @@ module.exports = {
   updateStatus,
   updatePriority,
   assign,
+  accept,
   addNote,
   sendMessage,
   getMyStats,

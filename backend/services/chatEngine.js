@@ -25,7 +25,7 @@ const {
   archiveExpiredConversation,
 } = require('./conversationService');
 const { buildEscalationResponse } = require('../utils/responseBuilder');
-const { createTicket, isSessionHandedOff } = require('./ticketService');
+const { createTicket, isSessionHandedOff, hasOpenTicket, getActiveTicketWithAgent } = require('./ticketService');
 const {
   searchFAQ,
   getRecommendation,
@@ -107,17 +107,31 @@ async function processMessage({ message, sessionId: providedSessionId, meta = {}
     timestamp: new Date().toISOString(),
   });
 
-  // ── STEP 3.5: Human handoff check ──────────────────────────────────────
-  // If an agent has already taken over this session's ticket, the bot goes
+  // ── STEP 3.5: Human handoff / open-ticket check ────────────────────────
+  // If an agent has already taken over this session's ticket, OR a ticket
+  // already exists and simply hasn't been picked up yet, the bot goes
   // silent from here on: the customer's message is still logged above so
   // the agent sees it live in the ticket transcript, but we skip
   // escalation/RAG/Claude entirely and hand control back to the caller
   // (chatControllerV2 / whatsappController) to not send a bot reply.
-  const handedOff = await isSessionHandedOff(sessionId);
+  //
+  // BUG FIX: this used to only check isSessionHandedOff (human_handled =
+  // true), so any follow-up message sent between "ticket created" and "an
+  // agent actually replies" fell through to the normal AI pipeline and
+  // got an unrelated fresh bot answer — talking over an escalation that
+  // was already in progress. Checking hasOpenTicket as well closes that
+  // gap: once a ticket exists, the bot stays quiet and waits.
+  const handedOff = (await isSessionHandedOff(sessionId)) || (await hasOpenTicket(sessionId));
   if (handedOff) {
     await logAnalytics(sessionId, 'human_handled_message', {
       timestamp: new Date().toISOString(),
     }).catch(() => {});
+
+    // Get agent details for the active ticket
+    const activeTicket = await getActiveTicketWithAgent(sessionId);
+    const assignedAgent = activeTicket && activeTicket.assigned_to 
+      ? { id: activeTicket.assigned_to, name: activeTicket.assigned_agent_name }
+      : null;
 
     return {
       sessionId,
@@ -126,6 +140,10 @@ async function processMessage({ message, sessionId: providedSessionId, meta = {}
       escalation: false,
       humanHandled: true,
       sentiment: null,
+      ticketNumber: activeTicket?.ticket_number || null,
+      ticketStatus: activeTicket?.status || 'open',
+      ticketCreatedAt: activeTicket?.created_at?.toISOString() || null,
+      assignedAgent,
       sessionStatus: checkSessionStatus(sessionId),
     };
   }
@@ -164,8 +182,12 @@ console.log(`🚨 [Escalation check] "${message}" → needsEscalation=${needsEsc
         customerName: meta.profileName || null,
       });
       ticketNumber = ticket.ticket_number;
+      console.log(`✅ [TICKET] Created successfully: ${ticketNumber}`);
     } catch (ticketError) {
-      console.error('❌ Failed to create ticket for escalation:', ticketError.message);
+      console.error('❌ [TICKET] Failed to create ticket for escalation:');
+      console.error('   Error message:', ticketError.message);
+      console.error('   Error code:', ticketError.code);
+      console.error('   Stack trace:', ticketError.stack);
     }
 
     const escalationResponse = ticketNumber
@@ -191,6 +213,8 @@ console.log(`🚨 [Escalation check] "${message}" → needsEscalation=${needsEsc
       isNewSession,
       escalation: true,
       ticketNumber,
+      ticketStatus: 'open',
+      ticketCreatedAt: new Date().toISOString(),
       sentiment,
       sessionStatus: checkSessionStatus(sessionId),
       suggestions: ['Find a branch', 'Contact customer care', 'File a complaint'],

@@ -8,13 +8,14 @@ import { cleanBimaText } from '@/lib/formatBimaMessages';
 interface MessageContentProps {
   content: string;
   isUser: boolean;
+  isSystem?: boolean
 }
 
-export function MessageContent({ content, isUser }: MessageContentProps) {
-  // User messages: plain text only, no markdown rendering
-  if (isUser) {
+export function MessageContent({ content, isUser, isSystem }: MessageContentProps) {
+  // System and user messages: plain text only, no markdown rendering
+  if (isUser || isSystem) {
     return (
-      <p className="text-sm text-white leading-relaxed whitespace-pre-wrap break-words">
+      <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">
         {content}
       </p>
     );

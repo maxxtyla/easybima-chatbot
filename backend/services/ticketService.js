@@ -42,6 +42,7 @@ async function createTicket({
 }) {
   const client = await pool.connect();
   try {
+    console.log(`📋 [TICKET] Starting ticket creation for session: ${sessionId}`);
     await client.query('BEGIN');
 
     // Repeat-contact signal feeds priority scoring — a session escalating
@@ -51,6 +52,7 @@ async function createTicket({
       [sessionId]
     );
     const isRepeatEscalation = priorHistory.rows[0].count > 0;
+    console.log(`📋 [TICKET] Is repeat escalation: ${isRepeatEscalation}`);
 
     const { tier, score, signals, slaDueAt } = computeTicketPriority({
       message: triggerMessage,
@@ -58,6 +60,7 @@ async function createTicket({
       category,
       isRepeatEscalation,
     });
+    console.log(`📋 [TICKET] Priority computed: tier=${tier}, score=${score}`);
 
     // Safety copy of the transcript so far — messages.session_id
     // cascade-deletes on session expiry/end-chat (see chatEngine.js), so
@@ -67,27 +70,45 @@ async function createTicket({
        WHERE session_id = $1 ORDER BY created_at ASC`,
       [sessionId]
     );
+    console.log(`📋 [TICKET] Transcript snapshot: ${transcriptResult.rows.length} messages`);
 
     const subject = triggerMessage.length > 140
       ? `${triggerMessage.slice(0, 137)}...`
       : triggerMessage;
 
+    console.log(`📋 [TICKET] Inserting ticket record...`);
+    // ticket_number is generated here explicitly (not left to the
+    // set_tickets_ticket_number DB trigger alone) — see
+    // database/migrations/2026_07_10_fix_ticket_number_generation.sql for
+    // why: the trigger was found to be missing on the live DB, which meant
+    // every ticket was silently inserted with ticket_number = NULL. Calling
+    // nextval() directly here means a ticket always gets a real reference
+    // number even in an environment where that trigger hasn't been applied.
     const ticketResult = await client.query(
       `INSERT INTO tickets (
-         session_id, channel, customer_name, customer_phone, customer_email,
-         category, subject, priority, priority_score, source, sla_due_at,
-         transcript_snapshot, metadata
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-       RETURNING *`,
+           ticket_number, session_id, channel, customer_name, customer_phone, customer_email,
+           category, subject, priority, priority_score, source, sla_due_at,
+           transcript_snapshot, metadata
+        ) VALUES ('TCK-' || LPAD(nextval('public.ticket_number_seq')::text, 6, '0'), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        RETURNING *`,
       [
-        sessionId, channel, customerName, customerPhone, customerEmail,
-        category, subject, tier, score, source, slaDueAt,
-        JSON.stringify(transcriptResult.rows),
-        JSON.stringify({ sentiment, priority_signals: signals, trigger_message: triggerMessage }),
+        sessionId,         // $1
+        channel,           // $2
+        customerName,      // $3
+        customerPhone,     // $4
+        customerEmail,     // $5
+        category,          // $6
+        subject,           // $7
+        tier,              // $8
+        score,             // $9
+        source,            // $10
+        slaDueAt,          // $11
+        JSON.stringify(transcriptResult.rows), // $12
+        JSON.stringify({ sentiment, priority_signals: signals, trigger_message: triggerMessage }), // $13
       ]
     );
-
     const ticket = ticketResult.rows[0];
+    console.log(`📋 [TICKET] Ticket record inserted: id=${ticket.id}, ticket_number=${ticket.ticket_number}`);
 
     await logTicketEvent(client, {
       ticketId: ticket.id,
@@ -97,10 +118,15 @@ async function createTicket({
     });
 
     await client.query('COMMIT');
+    console.log(`✅ [TICKET] Created successfully: ${ticket.ticket_number}`);
     return ticket;
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error('Error creating ticket:', error);
+    console.error('❌ [TICKET] Error creating ticket:');
+    console.error('   Message:', error.message);
+    console.error('   Code:', error.code);
+    console.error('   Detail:', error.detail);
+    console.error('   Stack:', error.stack);
     throw error;
   } finally {
     client.release();
@@ -270,6 +296,74 @@ async function updateTicketPriority(ticketId, priority, actorAgentId) {
   }
 }
 
+/**
+ * Agent explicitly accepting a ticket from the ticket detail page, before
+ * they're allowed to type anything to the customer. Distinct from
+ * assignTicket (which is a supervisor/admin reassignment action): this is
+ * self-service — any agent viewing an unaccepted ticket can accept it for
+ * themselves. Moves status straight to 'in_progress' (skipping 'assigned')
+ * since the agent is about to start actively working it, not just have it
+ * sitting assigned-but-untouched.
+ *
+ * Throws a tagged error (.code + .status) rather than a generic one so the
+ * controller can surface a specific, user-facing message instead of the
+ * generic "Something went wrong" the global error handler falls back to.
+ */
+async function acceptTicket(ticketId, agentId) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const ticketResult = await client.query('SELECT * FROM tickets WHERE id = $1 FOR UPDATE', [ticketId]);
+    const ticket = ticketResult.rows[0];
+    if (!ticket) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+
+    if (['resolved', 'closed'].includes(ticket.status)) {
+      await client.query('ROLLBACK');
+      const err = new Error('This ticket is already closed and can no longer be accepted.');
+      err.code = 'TICKET_CLOSED';
+      err.status = 409;
+      throw err;
+    }
+
+    if (ticket.assigned_to && ticket.assigned_to !== agentId) {
+      await client.query('ROLLBACK');
+      const err = new Error('This ticket has already been accepted by another agent.');
+      err.code = 'ALREADY_ASSIGNED';
+      err.status = 409;
+      throw err;
+    }
+
+    // Already accepted by this same agent (e.g. a duplicate click) — treat
+    // as a no-op success rather than an error.
+    if (ticket.assigned_to === agentId && ticket.status !== 'open') {
+      await client.query('ROLLBACK');
+      return ticket;
+    }
+
+    const result = await client.query(
+      `UPDATE tickets SET assigned_to = $1, status = 'in_progress' WHERE id = $2 RETURNING *`,
+      [agentId, ticketId]
+    );
+
+    await logTicketEvent(client, {
+      ticketId, actorType: 'agent', actorId: agentId,
+      eventType: 'accepted', eventData: {},
+    });
+
+    await client.query('COMMIT');
+    return result.rows[0];
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function assignTicket(ticketId, agentId, actorAgentId) {
   const client = await pool.connect();
   try {
@@ -337,6 +431,50 @@ async function isSessionHandedOff(sessionId) {
 }
 
 /**
+ * BUG FIX: previously chatEngine.js only went silent once human_handled
+ * flipped to true (i.e. once an agent had actually sent a reply). Between
+ * "ticket created" and "agent picks it up", any follow-up message from the
+ * customer (e.g. "ok waiting", "hello?") fell through to the normal
+ * RAG/AI pipeline and got a fresh, unrelated bot reply — including its own
+ * "anything else I can help with?" style closing — right after they'd
+ * just been told a ticket was created for them. That's confusing and is
+ * part of what looked like a broken escalation flow.
+ *
+ * This checks for ANY open (not resolved/closed) ticket on the session,
+ * regardless of human_handled, so the bot goes quiet as soon as a ticket
+ * exists and simply waits for a real agent, rather than talking over it.
+ */
+async function hasOpenTicket(sessionId) {
+  const result = await pool.query(
+    `SELECT id FROM tickets
+     WHERE session_id = $1 AND status NOT IN ('resolved', 'closed')
+     LIMIT 1`,
+    [sessionId]
+  );
+  return result.rows.length > 0;
+}
+
+/**
+ * Get the current active (open, not resolved/closed) ticket for a
+ * session, including agent details if one has been assigned yet.
+ * Returns null if no active ticket exists. Used both right after ticket
+ * creation (agent details will be null/unassigned) and once an agent has
+ * picked it up.
+ */
+async function getActiveTicketWithAgent(sessionId) {
+  const result = await pool.query(
+    `SELECT t.*, a.full_name AS assigned_agent_name
+     FROM tickets t
+     LEFT JOIN agents a ON a.id = t.assigned_to
+     WHERE t.session_id = $1 
+       AND t.status NOT IN ('resolved', 'closed')
+     LIMIT 1`,
+    [sessionId]
+  );
+  return result.rows[0] || null;
+}
+
+/**
  * Agent replying to the customer from the ticket detail page. Stores the
  * message with role='agent' (requires the messages_role_check migration),
  * flips the ticket to human_handled, self-assigns if unassigned, and
@@ -357,6 +495,35 @@ async function sendAgentMessage(ticketId, agentId, content) {
     if (!ticket) {
       await client.query('ROLLBACK');
       return null;
+    }
+
+    if (['resolved', 'closed'].includes(ticket.status)) {
+      await client.query('ROLLBACK');
+      const err = new Error('This ticket is closed. Reopen it before messaging the customer.');
+      err.code = 'TICKET_CLOSED';
+      err.status = 409;
+      throw err;
+    }
+
+    // Enforce "accept before you type": an agent can't message the
+    // customer until they've accepted the ticket (which self-assigns it
+    // and moves it to in_progress — see acceptTicket above). Without this,
+    // sendAgentMessage's old behaviour of auto-assigning on first message
+    // let an agent start typing before ever confirming they'd take the
+    // ticket, and let two agents collide on the same unaccepted ticket.
+    if (!ticket.assigned_to) {
+      await client.query('ROLLBACK');
+      const err = new Error('Accept this ticket before sending a message to the customer.');
+      err.code = 'NOT_ACCEPTED';
+      err.status = 409;
+      throw err;
+    }
+    if (ticket.assigned_to !== agentId) {
+      await client.query('ROLLBACK');
+      const err = new Error('This ticket is assigned to another agent.');
+      err.code = 'ASSIGNED_TO_OTHER';
+      err.status = 403;
+      throw err;
     }
 
     // Guard against a rare edge case: the session's conversation row was
@@ -404,6 +571,53 @@ async function sendAgentMessage(ticketId, agentId, content) {
 }
 
 /**
+ * Customer-initiated close from the chat widget ("Close ticket" button on
+ * the ticket card). Unlike updateTicketStatus (agent-only, takes any
+ * status), this only ever closes — permanently, per the requested UX — and
+ * is scoped by sessionId rather than a bare ticketId so a customer can only
+ * ever close their own session's ticket, not an arbitrary one by guessing
+ * an id. Returns null if there's no active ticket on this session (nothing
+ * to close, e.g. already closed).
+ */
+async function closeTicketByCustomer(sessionId) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const ticketResult = await client.query(
+      `SELECT * FROM tickets
+       WHERE session_id = $1 AND status NOT IN ('resolved', 'closed')
+       ORDER BY created_at DESC
+       LIMIT 1
+       FOR UPDATE`,
+      [sessionId]
+    );
+    const ticket = ticketResult.rows[0];
+    if (!ticket) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+
+    const result = await client.query(
+      `UPDATE tickets SET status = 'closed', resolved_at = COALESCE(resolved_at, NOW()) WHERE id = $1 RETURNING *`,
+      [ticket.id]
+    );
+
+    await logTicketEvent(client, {
+      ticketId: ticket.id, actorType: 'customer', eventType: 'closed_by_customer', eventData: {},
+    });
+
+    await client.query('COMMIT');
+    return result.rows[0];
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
  * Ticket counts for the signed-in agent's profile page. "Open" here means
  * actively in their queue (open/assigned/in_progress) as distinct from
  * pending_customer, so the three buckets don't overlap.
@@ -436,8 +650,12 @@ module.exports = {
   updateTicketStatus,
   updateTicketPriority,
   assignTicket,
+  acceptTicket,
   addTicketNote,
   isSessionHandedOff,
+  hasOpenTicket,
+  getActiveTicketWithAgent,
   sendAgentMessage,
+  closeTicketByCustomer,
   getAgentStats,
 };

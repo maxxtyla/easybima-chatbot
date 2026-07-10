@@ -50,6 +50,11 @@ function buildNewSessionResponse(sessionId) {
 }
 
 function buildEscalationResponse() {
+  // BUG FIX: this used to end with "Is there anything else I can help
+  // with in the meantime?" — a leftover closing question that doesn't
+  // make sense right after the customer has just been handed off to a
+  // live agent. It read as if the bot was still fishing for small talk
+  // instead of stepping back, so it's dropped here.
   return {
     response:
       "I understand you need extra assistance. I've created a ticket and one of our specialists will pick it up and reply to you right here in this chat.\n\n" +
@@ -57,7 +62,7 @@ function buildEscalationResponse() {
       "📞 **Call us:** +254 20 2823000\n" +
       "📧 **Email:** info@cicinsurancegroup.com\n" +
       "🌐 **Website:** https://www.cicinsurancegroup.com\n\n" +
-      "Our team is available Monday–Friday, 8:00 AM – 5:00 PM EAT. Is there anything else I can help with in the meantime?",
+      "Our team is available Monday–Friday, 8:00 AM – 5:00 PM EAT.",
     timestamp: new Date().toISOString(),
   };
 }

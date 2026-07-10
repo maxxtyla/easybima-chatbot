@@ -2,6 +2,7 @@
 
 import React from 'react'
 import { Header } from './Header'
+import { TicketInfo } from './TicketInfo'
 import { MessageList } from './MessageList'
 import { InputBar } from './InputBar'
 import { QuickQuestions } from './QuickQuestions'
@@ -60,12 +61,27 @@ export function ChatWindow({
   onConfirmClose,
   onCancelClose,
 }: ChatWindowProps) {
-  const { messages, isLoading, handleSendMessage } = chat
+  const { messages, isLoading, handleSendMessage, ticketNumber, assignedAgent, ticketStatus, ticketCreatedAt, closeTicket, isClosingTicket } = chat
   const showQuickQuestions = messages.length === 0
 
   return (
     <div className="relative flex flex-col h-full bg-cic-white rounded-lg shadow-widget overflow-hidden">
-      <Header onClose={onRequestClose} />
+      <Header 
+        onClose={onRequestClose}
+        ticketNumber={ticketNumber}
+        assignedAgent={assignedAgent}
+      />
+
+      {ticketNumber && (
+        <TicketInfo 
+          ticketNumber={ticketNumber}
+          assignedAgent={assignedAgent}
+          status={ticketStatus}
+          createdAt={ticketCreatedAt}
+          onClose={closeTicket}
+          isClosing={isClosingTicket}
+        />
+      )}
 
       <MessageList messages={messages} isLoading={isLoading} />
 
@@ -78,6 +94,8 @@ export function ChatWindow({
           onConfirm={onConfirmClose}
           onCancel={onCancelClose}
           isEnding={isEndingSession}
+          ticketNumber={ticketNumber}
+          hasOpenTicket={!!ticketNumber && !['resolved', 'closed'].includes(ticketStatus || 'open')}
         />
       )}
     </div>
