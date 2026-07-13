@@ -77,11 +77,13 @@ async function updateStatus(req, res, next) {
     // push here, a WhatsApp customer would never find out their ticket was
     // resolved/closed unless they happened to message again.
     if (['resolved', 'closed'].includes(status) && ticket.channel === 'whatsapp') {
+      console.log(`📲 [TICKET CLOSE][WHATSAPP] ticketId=${ticket.id} ticket=${ticket.ticket_number || ticket.id} sessionId=${ticket.session_id} status=${status} — pushing closure notice via Twilio`);
       try {
         await sendWhatsAppMessage(
           ticket.session_id,
           `✅ Your ticket ${ticket.ticket_number ? `#${ticket.ticket_number} ` : ''}has been marked as *${status}*. Thank you for chatting with CIC Insurance — message us anytime if you need more help!`
         );
+        console.log(`📲 [TICKET CLOSE][WHATSAPP] ticketId=${ticket.id} closure notice delivered`);
       } catch (sendError) {
         console.error('❌ Failed to notify WhatsApp customer of ticket closure:', sendError.message);
       }

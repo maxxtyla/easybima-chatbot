@@ -120,12 +120,16 @@ async function handleWhatsAppWebhook(req, res) {
         await sendWhatsAppMessage(sessionId, buildEndConfirmationPrompt());
         return;
       } else if (CLOSE_TICKET_PATTERN.test(message)) {
+        console.log(`📲 [TICKET CLOSE][WHATSAPP] sessionId=${sessionId} customer sent close-ticket command`);
         const ticket = await closeTicketByCustomer(sessionId);
 
         if (!ticket) {
+          console.log(`📲 [TICKET CLOSE][WHATSAPP] sessionId=${sessionId} no open ticket to close`);
           await sendWhatsAppMessage(sessionId, "You don't have an open ticket right now.");
           return;
         }
+
+        console.log(`📲 [TICKET CLOSE][WHATSAPP] sessionId=${sessionId} ticket=${ticket.ticket_number || ticket.id} closed by customer, sending confirmation`);
 
         await logMessage(sessionId, 'system', 'Customer closed the ticket.', {
           ticketId: ticket.id,

@@ -12,7 +12,7 @@ const {
   buildSessionExpiredResponse,
   buildErrorResponse,
 } = require('../utils/responseBuilder');
-const { getActiveTicketWithAgent, closeTicketByCustomer } = require('../services/ticketService');
+const { getLatestTicketWithAgent, closeTicketByCustomer } = require('../services/ticketService');
 
 /**
  * POST /api/chat
@@ -192,12 +192,17 @@ async function endSession(req, res) {
       return res.status(400).json({ error: 'missing_session_id', message: 'sessionId is required' });
     }
 
+    console.log(`🧹 [SESSION CLEANUP] Chat closed from frontend — sessionId=${sessionId}, starting cleanup`);
+
     await logAnalytics(sessionId, 'session_ended_by_user', {
       timestamp: new Date().toISOString(),
     }).catch(() => {});
 
     await deleteConversationData(sessionId);
+    console.log(`🧹 [SESSION CLEANUP] Conversation data deleted — sessionId=${sessionId}`);
+
     endSessionInMemory(sessionId);
+    console.log(`🧹 [SESSION CLEANUP] In-memory session cleared — sessionId=${sessionId}`);
 
     return res.json({
       success: true,
@@ -207,7 +212,7 @@ async function endSession(req, res) {
     });
 
   } catch (error) {
-    console.error('Error ending session:', error);
+    console.error(`🧹 [SESSION CLEANUP] Error ending session for sessionId=${sessionId}:`, error);
     return res.status(500).json({ error: 'end_session_failed', message: 'Failed to end session' });
   }
 }
@@ -229,10 +234,22 @@ async function getTicketStatus(req, res) {
       return res.status(400).json({ error: 'missing_session_id', message: 'sessionId is required' });
     }
 
-    const ticket = await getActiveTicketWithAgent(sessionId);
+    // BUG FIX: this used to call getActiveTicketWithAgent, which filters
+    // out resolved/closed tickets. That meant the moment an agent closed a
+    // ticket from the staff dashboard, this endpoint started reporting
+    // "no ticket" instead of "closed" — so the widget's poll loop never
+    // saw the terminal status and the customer was never told their
+    // ticket had been closed. getLatestTicketWithAgent returns the ticket
+    // regardless of status so that transition is visible here.
+    const ticket = await getLatestTicketWithAgent(sessionId);
+    const isTerminal = ticket && ['resolved', 'closed'].includes(ticket.status);
+
+    if (isTerminal) {
+      console.log(`🔒 [TICKET STATUS] sessionId=${sessionId} ticket=${ticket.ticket_number || ticket.id} status=${ticket.status} — reporting terminal status to widget poll`);
+    }
 
     return res.json({
-      hasActiveTicket: !!ticket,
+      hasActiveTicket: !!ticket && !isTerminal,
       ticketNumber: ticket?.ticket_number || null,
       ticketStatus: ticket?.status || null,
       ticketCreatedAt: ticket?.created_at ? new Date(ticket.created_at).toISOString() : null,
@@ -264,8 +281,11 @@ async function closeTicket(req, res) {
 
     const ticket = await closeTicketByCustomer(sessionId);
     if (!ticket) {
+      console.log(`🔒 [TICKET CLOSE][WEB] sessionId=${sessionId} no open ticket to close`);
       return res.status(404).json({ error: 'not_found', message: 'No open ticket found for this session.' });
     }
+
+    console.log(`🔒 [TICKET CLOSE][WEB] sessionId=${sessionId} ticket=${ticket.ticket_number || ticket.id} closed by customer via widget`);
 
     // Best-effort transcript note — non-fatal if it fails, the ticket is
     // already closed either way.

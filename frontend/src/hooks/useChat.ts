@@ -196,7 +196,20 @@ export function useChat() {
 
     try {
       const ticket = await getTicketStatus(state.sessionId);
-      if (!ticket.hasActiveTicket && !TERMINAL_TICKET_STATUSES.includes(lastKnownTicketStatusRef.current || '')) {
+
+      // BUG FIX: hasActiveTicket is false both when there's genuinely no
+      // ticket at all AND the moment a ticket has just been closed/resolved
+      // (an active ticket, by definition, excludes terminal statuses) — the
+      // backend now reports the ticket's real status either way. Previously
+      // this guard only looked at hasActiveTicket, so as soon as an agent
+      // closed a ticket from the staff dashboard, this returned early on
+      // every single poll and the "your ticket has been closed" message
+      // below never had a chance to run — the customer's widget just went
+      // quiet with no explanation. Falling through whenever the freshly
+      // reported status is itself terminal fixes that, while still
+      // early-returning for the genuinely-nothing-going-on case.
+      const reportedIsTerminal = TERMINAL_TICKET_STATUSES.includes(ticket.ticketStatus || '');
+      if (!ticket.hasActiveTicket && !reportedIsTerminal && !TERMINAL_TICKET_STATUSES.includes(lastKnownTicketStatusRef.current || '')) {
         // Nothing active and we hadn't already flagged it as closed — leave
         // state as-is, the next real message will reconcile it.
         return;
@@ -400,12 +413,14 @@ export function useChat() {
   const endChatSession = useCallback(async () => {
     clearWrapUpTimer();
     const sessionToEnd = state.sessionId;
+    console.log(`🧹 [SESSION CLEANUP] Chat closed from frontend — sessionId=${sessionToEnd}, starting cleanup`);
     try {
       if (sessionToEnd) {
         await endSession(sessionToEnd);
+        console.log(`🧹 [SESSION CLEANUP] Backend session/data cleanup confirmed for sessionId=${sessionToEnd}`);
       }
     } catch (error) {
-      console.error('Failed to end session on backend:', error);
+      console.error(`🧹 [SESSION CLEANUP] Failed to end session on backend for sessionId=${sessionToEnd}:`, error);
     } finally {
       const newSessionId = generateId();
       localStorage.setItem(STORAGE_KEY, newSessionId);
@@ -422,6 +437,7 @@ export function useChat() {
         ticketCreatedAt: undefined,
         assignedAgent: null,
       }));
+      console.log(`🧹 [SESSION CLEANUP] Local state reset — new sessionId=${newSessionId}`);
     }
   }, [state.sessionId, clearWrapUpTimer]);
 

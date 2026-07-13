@@ -276,6 +276,11 @@ async function updateTicketStatus(ticketId, status, actorAgentId) {
     });
 
     await client.query('COMMIT');
+
+    if (['resolved', 'closed'].includes(status)) {
+      console.log(`🔒 [TICKET CLOSE] ticketId=${ticketId} ticket=${result.rows[0].ticket_number || ticketId} channel=${result.rows[0].channel} status=${status} closedByAgentId=${actorAgentId}`);
+    }
+
     return result.rows[0];
   } catch (error) {
     await client.query('ROLLBACK');
@@ -494,6 +499,44 @@ async function getActiveTicketWithAgent(sessionId) {
 }
 
 /**
+ * Get the most recent ticket for a session regardless of status, including
+ * agent details if one has been assigned.
+ *
+ * BUG FIX: this exists specifically for the customer-facing status poll
+ * (GET /api/chat/ticket/:sessionId). That endpoint used to call
+ * getActiveTicketWithAgent, which filters out resolved/closed tickets by
+ * design (it's meant for "is there an open ticket right now" checks like
+ * chatEngine's hand-off logic). That meant the instant an agent closed a
+ * ticket from the staff dashboard, the very next poll tick found no
+ * "active" ticket at all and returned hasActiveTicket:false with a null
+ * status — so the widget's poll loop bailed out early (see the
+ * `!ticket.hasActiveTicket && !TERMINAL...` guard in useChat.ts) and never
+ * saw the closed/resolved status to announce it. The customer's chat
+ * session just sat there with no closure message, looking like the ticket
+ * had vanished rather than been resolved. WhatsApp didn't have this
+ * problem because ticketController.updateStatus pushes a message directly
+ * over the Twilio REST API when an agent closes a ticket — the web widget
+ * has no such push channel and relies entirely on this poll.
+ *
+ * By always returning the latest ticket (open or terminal), the poll
+ * endpoint can report the true current status and the frontend's own
+ * "was it terminal before, is it terminal now" transition check takes
+ * care of announcing it exactly once.
+ */
+async function getLatestTicketWithAgent(sessionId) {
+  const result = await pool.query(
+    `SELECT t.*, a.full_name AS assigned_agent_name
+     FROM tickets t
+     LEFT JOIN agents a ON a.id = t.assigned_to
+     WHERE t.session_id = $1
+     ORDER BY t.created_at DESC
+     LIMIT 1`,
+    [sessionId]
+  );
+  return result.rows[0] || null;
+}
+
+/**
  * Agent replying to the customer from the ticket detail page. Stores the
  * message with role='agent' (requires the messages_role_check migration),
  * flips the ticket to human_handled, self-assigns if unassigned, and
@@ -627,6 +670,9 @@ async function closeTicketByCustomer(sessionId) {
     });
 
     await client.query('COMMIT');
+
+    console.log(`🔒 [TICKET CLOSE] ticketId=${ticket.id} ticket=${result.rows[0].ticket_number || ticket.id} channel=${result.rows[0].channel} status=closed closedBy=customer sessionId=${sessionId}`);
+
     return result.rows[0];
   } catch (error) {
     await client.query('ROLLBACK');
@@ -674,6 +720,7 @@ module.exports = {
   isSessionHandedOff,
   hasOpenTicket,
   getActiveTicketWithAgent,
+  getLatestTicketWithAgent,
   sendAgentMessage,
   closeTicketByCustomer,
   getAgentStats,
