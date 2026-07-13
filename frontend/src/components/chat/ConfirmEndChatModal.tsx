@@ -31,9 +31,7 @@ export function ConfirmEndChatModal({ onConfirm, onCancel, isEnding, ticketNumbe
         </p>
         {hasOpenTicket && (
           <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
-            ⚠️ You still have an open support ticket{ticketNumber ? ` (#${ticketNumber})` : ''}. Ending the chat won&apos;t
-            cancel it — an agent will still reach out. Use &ldquo;Close this ticket&rdquo; on the ticket card instead
-            if you want to cancel it entirely.
+            ⚠️ You still have an open support ticket{ticketNumber ? ` (${ticketNumber})` : ''}. Do you want to cancel it entirely?
           </p>
         )}
         <div className="flex gap-2 justify-end">

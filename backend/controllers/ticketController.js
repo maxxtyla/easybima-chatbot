@@ -59,8 +59,34 @@ async function updateStatus(req, res, next) {
     if (!VALID_STATUSES.includes(status)) {
       return res.status(400).json({ error: 'Validation Error', message: `status must be one of: ${VALID_STATUSES.join(', ')}` });
     }
-    const ticket = await ticketService.updateTicketStatus(req.params.id, status, req.agent.sub);
+
+    let ticket;
+    try {
+      ticket = await ticketService.updateTicketStatus(req.params.id, status, req.agent.sub);
+    } catch (statusError) {
+      if (statusError.code === 'TICKET_CLOSED') {
+        return res.status(statusError.status || 409).json({ error: statusError.code, message: statusError.message });
+      }
+      throw statusError;
+    }
     if (!ticket) return res.status(404).json({ error: 'Not Found', message: 'Ticket not found.' });
+
+    // Notify the customer when their ticket reaches a terminal state.
+    // The web widget already picks this up itself via its ticket-status
+    // poll, but WhatsApp has no client-side polling — without a proactive
+    // push here, a WhatsApp customer would never find out their ticket was
+    // resolved/closed unless they happened to message again.
+    if (['resolved', 'closed'].includes(status) && ticket.channel === 'whatsapp') {
+      try {
+        await sendWhatsAppMessage(
+          ticket.session_id,
+          `✅ Your ticket ${ticket.ticket_number ? `#${ticket.ticket_number} ` : ''}has been marked as *${status}*. Thank you for chatting with CIC Insurance — message us anytime if you need more help!`
+        );
+      } catch (sendError) {
+        console.error('❌ Failed to notify WhatsApp customer of ticket closure:', sendError.message);
+      }
+    }
+
     return res.json({ ticket });
   } catch (error) {
     return next(error);
@@ -89,6 +115,22 @@ async function assign(req, res, next) {
     }
     const ticket = await ticketService.assignTicket(req.params.id, agentId, req.agent.sub);
     if (!ticket) return res.status(404).json({ error: 'Not Found', message: 'Ticket not found.' });
+
+    if (ticket.channel === 'whatsapp') {
+      try {
+        // assignTicket's plain UPDATE...RETURNING doesn't carry the
+        // agent's name, so look the ticket back up joined with agents.
+        const withAgent = await ticketService.getTicketById(ticket.id);
+        const agentName = withAgent?.assigned_agent_name || 'One of our agents';
+        await sendWhatsAppMessage(
+          ticket.session_id,
+          `🎯 ${agentName} has been assigned to ticket ${ticket.ticket_number ? `#${ticket.ticket_number} ` : ''}and will be helping you now.`
+        );
+      } catch (sendError) {
+        console.error('❌ Failed to notify WhatsApp customer of ticket assignment:', sendError.message);
+      }
+    }
+
     return res.json({ ticket });
   } catch (error) {
     return next(error);
@@ -106,6 +148,22 @@ async function accept(req, res, next) {
   try {
     const ticket = await ticketService.acceptTicket(req.params.id, req.agent.sub);
     if (!ticket) return res.status(404).json({ error: 'Not Found', message: 'Ticket not found.' });
+
+    // WhatsApp customers have no widget UI showing "X has joined" the way
+    // the web chat does — without this push they never learn who (or
+    // whether anyone) picked up their ticket.
+    if (ticket.channel === 'whatsapp') {
+      try {
+        const agentName = req.agent.fullName || 'One of our agents';
+        await sendWhatsAppMessage(
+          ticket.session_id,
+          `🎯 ${agentName} has joined ticket ${ticket.ticket_number ? `#${ticket.ticket_number} ` : ''}and will be helping you now.`
+        );
+      } catch (sendError) {
+        console.error('❌ Failed to notify WhatsApp customer of ticket acceptance:', sendError.message);
+      }
+    }
+
     return res.json({ ticket });
   } catch (error) {
     if (error.code === 'ALREADY_ASSIGNED' || error.code === 'TICKET_CLOSED') {

@@ -92,15 +92,25 @@ export default function TicketDetailPage() {
     loadTicket();
   }, [loadTicket]);
 
-  // Live transcript polling — picks up both the customer's incoming
-  // messages and this agent's own sent replies (echoed back once
+  // Live transcript + status polling — picks up both the customer's
+  // incoming messages and this agent's own sent replies (echoed back once
   // persisted). Stops once the ticket is resolved/closed since nothing
   // more will arrive on a dead conversation.
+  //
+  // BUG FIX: this used to only re-fetch messages, never the ticket itself.
+  // That meant a ticket the customer closed (or that another agent
+  // resolved) from outside this page never updated here — the reply box
+  // and status dropdown kept showing as if it were still open until the
+  // agent manually refreshed, which is exactly the kind of "closed from
+  // the other side but nobody here found out" gap being fixed. Now the
+  // ticket record is refetched on every tick too, so the terminal-state
+  // banner (and the stop condition above) actually kicks in on its own.
   useEffect(() => {
     if (!ticket || TERMINAL_STATUSES.includes(ticket.status)) return;
     const interval = setInterval(() => {
-      getTicketMessages(ticketId)
-        .then(({ messages, source }) => {
+      Promise.all([getTicket(ticketId), getTicketMessages(ticketId)])
+        .then(([{ ticket: freshTicket }, { messages, source }]) => {
+          setTicket(freshTicket);
           setMessages(messages);
           setMessageSource(source);
         })
@@ -331,20 +341,37 @@ export default function TicketDetailPage() {
 
             <div>
               <label className="text-xs text-neutral-500">Status</label>
-              <select
-                value={ticket.status}
-                onChange={(e) => handleStatusChange(e.target.value as TicketStatus)}
-                className="w-full mt-1 rounded-lg border border-neutral-300 px-3 py-1.5 text-sm bg-cic-white"
-              >
-                {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
-              </select>
-              {!TERMINAL_STATUSES.includes(ticket.status) && (
-                <button
-                  onClick={handleCloseTicket}
-                  className="mt-2 w-full rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm py-1.5 font-medium"
-                >
-                  Close ticket
-                </button>
+              {TERMINAL_STATUSES.includes(ticket.status) ? (
+                // Resolved/closed tickets are permanent — no dropdown here,
+                // so there's no UI path to reopen one. The backend also
+                // rejects a status change away from resolved/closed, but
+                // not offering the option at all is the clearer signal.
+                <div className="mt-1">
+                  <span className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium w-full ${
+                    ticket.status === 'resolved' ? 'bg-green-50 text-green-800' : 'bg-neutral-100 text-neutral-700'
+                  }`}>
+                    {STATUS_LABELS[ticket.status]}
+                  </span>
+                  <p className="mt-1.5 text-xs text-neutral-400">
+                    This ticket is {ticket.status} and can&apos;t be reopened.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <select
+                    value={ticket.status}
+                    onChange={(e) => handleStatusChange(e.target.value as TicketStatus)}
+                    className="w-full mt-1 rounded-lg border border-neutral-300 px-3 py-1.5 text-sm bg-cic-white"
+                  >
+                    {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
+                  </select>
+                  <button
+                    onClick={handleCloseTicket}
+                    className="mt-2 w-full rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm py-1.5 font-medium"
+                  >
+                    Close ticket
+                  </button>
+                </>
               )}
             </div>
 

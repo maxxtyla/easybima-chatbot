@@ -193,16 +193,26 @@ async function getConversationWithExpirationCheck(sessionId) {
     }
 
     const conv = result.rows[0];
-    // Backstop cap, independent of anything upstream getting expiry/archival
-    // wrong: even for a legitimately long-running session, claudeService
-    // only ever uses the last 8 messages, so there's no reason to ever
-    // pull more than a small multiple of that back from the DB.
+    // BUG FIX: this used to LIMIT 20 as a backstop, on the reasoning that
+    // claudeService only ever uses the last 8 messages for AI context. But
+    // this same function also backs GET /api/chat/conversation/:sessionId,
+    // which the widget polls to detect new agent replies by comparing
+    // message-array length against a running count (see useChat.ts's
+    // pollForAgentReplies). Once a handed-off conversation passed 20 total
+    // rows, the array length this returned stopped growing (capped at 20),
+    // so the "did new messages arrive" check could never fire again —
+    // agent replies were saved in the DB but never reached the customer,
+    // who just kept seeing "Connecting you..." That's why it only showed
+    // up "sometimes": short conversations never hit the cap.
+    // 200 is a generous ceiling for a live support conversation while
+    // still bounding the query; claudeService still only feeds the last 8
+    // of whatever comes back into the LLM call.
     const messagesResult = await pool.query(
       `SELECT id, role, content, created_at
        FROM messages
        WHERE session_id = $1
        ORDER BY created_at DESC
-       LIMIT 20`,
+       LIMIT 200`,
       [sessionId]
     );
     messagesResult.rows.reverse(); // restore chronological order

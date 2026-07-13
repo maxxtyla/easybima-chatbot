@@ -76,7 +76,7 @@ export function ChatWidget() {
       {isOpen && (
         <div
           className={cn(
-            'absolute bottom-20 right-0 w-96 h-96 sm:w-96 sm:h-[500px]',
+            'absolute bottom-20 right-0 w-96 h-[520px] sm:w-96 sm: h-[min(560px,calc(99vh-6rem))]',
             'rounded-lg shadow-widget overflow-hidden',
             'slide-in origin-bottom-right'
           )}

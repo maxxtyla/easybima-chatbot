@@ -237,6 +237,25 @@ async function updateTicketStatus(ticketId, status, actorAgentId) {
   try {
     await client.query('BEGIN');
 
+    // Terminal states are permanent, per the requested UX: once a ticket is
+    // resolved/closed (by either the agent or the customer), it can never
+    // be moved back to any other status. Lock the row first so a
+    // concurrent close and status-change can't race each other into a
+    // reopened ticket.
+    const existingResult = await client.query('SELECT status FROM tickets WHERE id = $1 FOR UPDATE', [ticketId]);
+    const existing = existingResult.rows[0];
+    if (!existing) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+    if (['resolved', 'closed'].includes(existing.status)) {
+      await client.query('ROLLBACK');
+      const err = new Error('This ticket is already resolved or closed and cannot be reopened.');
+      err.code = 'TICKET_CLOSED';
+      err.status = 409;
+      throw err;
+    }
+
     const resolvedClause = ['resolved', 'closed'].includes(status)
       ? ', resolved_at = COALESCE(resolved_at, NOW())'
       : '';

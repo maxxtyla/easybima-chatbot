@@ -74,11 +74,7 @@ export function TicketInfo({
 
         {/* Short Inline Actions */}
         <div className="flex items-center gap-3">
-          {assignedAgent?.name && (
-            <span className="text-gray-500 font-medium max-w-[100px] truncate">
-               {assignedAgent.name.split(' ')[0]}
-            </span>
-          )}
+         
 
           {!isTerminal && onClose && !confirmingClose && (
             <button
@@ -105,7 +101,7 @@ export function TicketInfo({
             </button>
             <button
               onClick={() => {
-                onClose()
+                onClose?.()
                 setConfirmingClose(false)
               }}
               disabled={isClosing}

@@ -7,35 +7,25 @@ import { MessageList } from './MessageList'
 import { InputBar } from './InputBar'
 import { QuickQuestions } from './QuickQuestions'
 import { ConfirmEndChatModal } from './ConfirmEndChatModal'
+import { HomeTab } from './HomeTab'
+import { TabBar, WidgetTab } from './TabBar'
 import { useChat } from '@/hooks/useChat'
-import { QuickQuestion } from '@/types/chat'
+import { Message, QuickQuestion, ReplySnippet } from '@/types/chat'
 
 const QUICK_QUESTIONS: QuickQuestion[] = [
   {
     id: '1',
-    text: 'How do I get an insurance quote?',
+    text: 'Get an insurance quote',
   },
   {
     id: '2',
-    text: 'What insurance products do you offer?',
+    text: 'Buy an insurance Cover',
   },
   {
     id: '3',
-    text: 'How do I file a claim?',
-  },
-  {
-    id: '4',
-    text: 'What saving solutions do you offer?',
-  },
-  {
-    id: '5',
-    text: 'Do you offer health insurance?',
-  },
- 
-  {
-    id: '6',
     text: 'Tell me about  CIC insurance Group.',
   },
+ 
 ]
 
 interface ChatWindowProps {
@@ -64,6 +54,36 @@ export function ChatWindow({
   const { messages, isLoading, handleSendMessage, ticketNumber, assignedAgent, ticketStatus, ticketCreatedAt, closeTicket, isClosingTicket } = chat
   const showQuickQuestions = messages.length === 0
 
+  const hasActiveConversation = messages.length > 0 || !!ticketNumber
+  const [activeTab, setActiveTab] = React.useState<WidgetTab>(hasActiveConversation ? 'chat' : 'home')
+  const [replyTo, setReplyTo] = React.useState<ReplySnippet | null>(null)
+
+  // Flag the Conversation tab with a dot when a bot/agent message lands
+  // while the person is browsing the Home tab, so they know something's
+  // waiting without being yanked over automatically.
+  const seenCountRef = React.useRef(messages.length)
+  const [showChatBadge, setShowChatBadge] = React.useState(false)
+  React.useEffect(() => {
+    if (activeTab === 'chat') {
+      seenCountRef.current = messages.length
+      setShowChatBadge(false)
+      return
+    }
+    if (messages.length > seenCountRef.current) {
+      const last = messages[messages.length - 1]
+      if (last && last.role !== 'user') setShowChatBadge(true)
+    }
+  }, [messages, activeTab])
+
+  const handleReply = (message: Message) => {
+    setReplyTo({ id: message.id, role: message.role, content: message.content })
+  }
+
+  const handleSend = (text: string, reply?: ReplySnippet) => {
+    handleSendMessage(text, reply)
+    setReplyTo(null)
+  }
+
   return (
     <div className="relative flex flex-col h-full bg-cic-white rounded-lg shadow-widget overflow-hidden">
       <Header 
@@ -72,22 +92,30 @@ export function ChatWindow({
         assignedAgent={assignedAgent}
       />
 
-      {ticketNumber && (
-        <TicketInfo 
-          ticketNumber={ticketNumber}
-          assignedAgent={assignedAgent}
-          status={ticketStatus}
-          createdAt={ticketCreatedAt}
-          onClose={closeTicket}
-          isClosing={isClosingTicket}
-        />
+      {activeTab === 'home' ? (
+        <HomeTab hasActiveConversation={hasActiveConversation} onStartChat={() => setActiveTab('chat')} />
+      ) : (
+        <>
+          {ticketNumber && (
+            <TicketInfo 
+              ticketNumber={ticketNumber}
+              assignedAgent={assignedAgent}
+              status={ticketStatus}
+              createdAt={ticketCreatedAt}
+              onClose={closeTicket}
+              isClosing={isClosingTicket}
+            />
+          )}
+
+          <MessageList messages={messages} isLoading={isLoading} onReply={handleReply} />
+
+          {showQuickQuestions && <QuickQuestions questions={QUICK_QUESTIONS} onSelect={handleSendMessage} isLoading={isLoading} />}
+
+          <InputBar onSend={handleSend} isLoading={isLoading} replyTo={replyTo} onCancelReply={() => setReplyTo(null)} />
+        </>
       )}
 
-      <MessageList messages={messages} isLoading={isLoading} />
-
-      {showQuickQuestions && <QuickQuestions questions={QUICK_QUESTIONS} onSelect={handleSendMessage} isLoading={isLoading} />}
-
-      <InputBar onSend={handleSendMessage} isLoading={isLoading} />
+      <TabBar active={activeTab} onChange={setActiveTab} showChatBadge={showChatBadge} />
 
       {showCloseConfirm && (
         <ConfirmEndChatModal

@@ -26,11 +26,7 @@ export function Header({ onClose, ticketNumber, assignedAgent }: HeaderProps) {
             </p>
             {hasActiveTicket && (
               <div className="flex gap-2 text-xs">
-                {ticketNumber && (
-                  <span className="bg-red-700 px-2 py-0.5 rounded">
-                    #{ticketNumber}
-                  </span>
-                )}
+               
                 {assignedAgent?.name && (
                   <span className="bg-red-700 px-2 py-0.5 rounded">
                     {assignedAgent.name}

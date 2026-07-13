@@ -3,30 +3,46 @@
 import React from 'react'
 import { Message } from '@/types/chat'
 import { MessageContent } from './MessageContent'
+import { ReplyIcon } from './UiIcons'
 import { formatTime, cn } from '@/lib/utils'
 
 interface MessageBubbleProps {
   message: Message
+  onReply?: (message: Message) => void
 }
 
-export function MessageBubble({ message }: MessageBubbleProps) {
+export function MessageBubble({ message, onReply }: MessageBubbleProps) {
   const isUser = message.role === 'user'
   const isAgent = message.role === 'agent'
   const isSystem = message.role === 'system'
 
   return (
-    
     <div
       className={cn(
-        'flex chat-message',
+        'group flex items-end gap-1 chat-message',
         isUser ? 'justify-end' : 'justify-start'
       )}
     >
+      {/* Reply affordance on the left of user bubbles so it sits between
+          the bubble and the edge, mirroring where it appears on the right
+          for bot/agent bubbles. Only shown on hover/focus, and hidden for
+          system messages since replying to those doesn't make sense. */}
+      {!isSystem && isUser && onReply && (
+        <button
+          type="button"
+          onClick={() => onReply(message)}
+          aria-label="Reply to this message"
+          className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity flex-shrink-0 mb-1 w-6 h-6 rounded-full bg-white border border-neutral-200 text-neutral-500 hover:text-cic-red hover:border-cic-red flex items-center justify-center shadow-sm"
+        >
+          <ReplyIcon className="w-3.5 h-3.5" />
+        </button>
+      )}
+
       {/* Avatar — Bima for the bot, a distinct badge for a human agent */}
       {!isUser && !isSystem && (
         <div
           className={cn(
-            'flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center mr-2 mt-1 self-start',
+            'flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center mr-1 mb-1 self-end',
             isAgent ? 'bg-emerald-600' : 'bg-cic-red'
           )}
         >
@@ -52,6 +68,20 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           </span>
         )}
 
+        {message.replyTo && (
+          <div
+            className={cn(
+              'mb-2 pl-2 border-l-2 rounded-r text-xs py-1 pr-2',
+              isUser ? 'border-red-200 bg-white/10 text-red-50' : 'border-cic-red bg-black/5 text-neutral-500'
+            )}
+          >
+            <p className={cn('font-semibold', isUser ? 'text-red-100' : 'text-neutral-600')}>
+              {roleLabel(message.replyTo.role)}
+            </p>
+            <p className="truncate">{message.replyTo.content}</p>
+          </div>
+        )}
+
         {/* 
           FIX: was rendering `message.content` as raw text — bypassing 
           all markdown. Now delegates to MessageContent which runs the 
@@ -68,9 +98,24 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           {formatTime(message.timestamp)}
         </span>
       </div>
+
+      {!isSystem && !isUser && onReply && (
+        <button
+          type="button"
+          onClick={() => onReply(message)}
+          aria-label="Reply to this message"
+          className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity flex-shrink-0 mb-1 w-6 h-6 rounded-full bg-white border border-neutral-200 text-neutral-500 hover:text-cic-red hover:border-cic-red flex items-center justify-center shadow-sm"
+        >
+          <ReplyIcon className="w-3.5 h-3.5" />
+        </button>
+      )}
     </div>
-
-
-
   )
+}
+
+function roleLabel(role: Message['role']) {
+  if (role === 'user') return 'You'
+  if (role === 'agent') return 'Agent'
+  if (role === 'system') return 'System'
+  return 'Bima'
 }

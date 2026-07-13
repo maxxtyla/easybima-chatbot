@@ -2,12 +2,20 @@ export type MessageRole = 'user' | 'assistant' | 'agent' | 'system'
 
 export type TicketStatus = 'open' | 'assigned' | 'in_progress' | 'pending_customer' | 'resolved' | 'closed'
 
+export interface ReplySnippet {
+  id: string
+  role: MessageRole
+  content: string
+}
+
 export interface Message {
   id: string
   role: MessageRole
   content: string
   timestamp: number
   isLoading?: boolean
+  /** Present when this message was sent as a reply to an earlier one. */
+  replyTo?: ReplySnippet
 }
 
 export interface ChatResponse {
@@ -44,4 +52,25 @@ export interface QuickQuestion {
   id: string
   text: string
   icon?: string
+}
+
+/** Icon keys rendered by <QuickLinkIcon>. Kept as a closed set so the
+ *  editor can offer a picker instead of a free-text field. */
+export type QuickLinkIconKey =
+  | 'calendar'
+  | 'wallet'
+  | 'shield'
+  | 'lifebuoy'
+  | 'link'
+  | 'phone'
+  | 'mail'
+  | 'file'
+  | 'home'
+  | 'star'
+
+export interface QuickLink {
+  id: string
+  label: string
+  url: string
+  icon: QuickLinkIconKey
 }

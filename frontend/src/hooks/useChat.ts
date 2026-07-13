@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Message, ChatState } from '@/types/chat';
+import { Message, ChatState, ReplySnippet } from '@/types/chat';
 import { generateId } from '@/lib/utils';
 import { sendMessage, keepAliveSession, endSession, getConversationHistory, getTicketStatus, closeTicket as closeTicketApi } from '@/lib/api';
 
@@ -43,8 +43,15 @@ export function useChat() {
   const backendMessageCountRef = useRef(0);
   // Which agent id we've already announced with the "X has joined" system
   // message — prevents re-announcing on every poll tick while the same
-  // agent remains assigned.
+  // agent remains assigned. Also shared with handleSendMessage below so a
+  // customer typing while waiting doesn't retrigger the same announcement.
   const announcedAgentIdRef = useRef<string | null>(null);
+  // Whether we've already shown the "please hold, we're connecting you"
+  // message for the ticket currently open. Without this, every message a
+  // customer sent while waiting for an agent to accept re-triggered the
+  // same "Connecting you..." system message — see BUG FIX note in
+  // handleSendMessage's humanHandled branch below.
+  const waitingAnnouncedRef = useRef(false);
   // Last ticket status we've rendered a system message for, so a
   // resolved/closed transition (done from the staff side, e.g. the agent
   // closes it) only gets announced once.
@@ -135,16 +142,20 @@ export function useChat() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.sessionId]);
 
-  const addMessage = useCallback((role: 'user' | 'assistant' | 'agent' | 'system', content: string) => {
-    const message: Message = {
-      id: generateId(),
-      role,
-      content,
-      timestamp: Date.now(),
-    };
-    setState((prev) => ({ ...prev, messages: [...prev.messages, message] }));
-    return message;
-  }, []);
+  const addMessage = useCallback(
+    (role: 'user' | 'assistant' | 'agent' | 'system', content: string, replyTo?: ReplySnippet) => {
+      const message: Message = {
+        id: generateId(),
+        role,
+        content,
+        timestamp: Date.now(),
+        ...(replyTo ? { replyTo } : {}),
+      };
+      setState((prev) => ({ ...prev, messages: [...prev.messages, message] }));
+      return message;
+    },
+    []
+  );
 
   // Every new message (either side) pushes the wrap-up prompt back out by
   // WRAP_UP_IDLE_MS. If nothing happens for that long, ask a natural
@@ -195,7 +206,7 @@ export function useChat() {
       // system message, once per agent.
       if (ticket.assignedAgent && announcedAgentIdRef.current !== ticket.assignedAgent.id) {
         announcedAgentIdRef.current = ticket.assignedAgent.id;
-        addMessage('system', `🎯 ${ticket.assignedAgent.name} has joined the conversation and will be helping you today.`);
+        addMessage('system', `Your chat has been transferred to ${ticket.assignedAgent.name}`);
       }
 
       // Ticket got resolved/closed from the staff side while the customer
@@ -206,6 +217,8 @@ export function useChat() {
       if (isTerminal && !wasTerminal && lastKnownTicketStatusRef.current !== null) {
         addMessage('system', `✅ Your ticket ${ticket.ticketNumber ? `#${ticket.ticketNumber} ` : ''}has been marked as ${ticket.ticketStatus}. Thank you for chatting with us!`);
         setIsEscalated(false);
+        announcedAgentIdRef.current = null;
+        waitingAnnouncedRef.current = false;
       }
       lastKnownTicketStatusRef.current = ticket.ticketStatus;
 
@@ -246,10 +259,10 @@ export function useChat() {
   }, [isEscalated, state.sessionId, pollForAgentReplies]);
 
   const handleSendMessage = useCallback(
-    async (userMessage: string) => {
+    async (userMessage: string, replyTo?: ReplySnippet) => {
       if (!userMessage.trim() || state.isLoading) return;
 
-      addMessage('user', userMessage);
+      addMessage('user', userMessage, replyTo);
       setState((prev) => ({ ...prev, isLoading: true }));
 
       try {
@@ -286,12 +299,30 @@ export function useChat() {
           // An agent has already taken this session over — the bot stays
           // silent (no response.response to show). The poll effect above
           // will pick up the agent's reply once they send one.
+          //
+          // BUG FIX: this used to unconditionally add a "Connecting you to
+          // X... Please hold on" system message on EVERY customer message
+          // sent while handed off — so a customer waiting or chatting with
+          // an already-assigned agent saw "Connecting you..." repeated on
+          // every send, on top of (or instead of) the agent's actual
+          // replies, which looked exactly like the bot being stuck. This
+          // now reuses the same ref the poll effect uses, so the
+          // agent-joined message fires at most once per ticket regardless
+          // of whether the poll tick or the next sent message notices it
+          // first, and the "please hold" message (shown while no agent has
+          // accepted yet) also only fires once.
           clearWrapUpTimer();
           if (response.assignedAgent?.name) {
-            addMessage(
-              'system',
-              `🎯 Connecting you to ${response.assignedAgent.name}... Please hold on.`
-            );
+            if (announcedAgentIdRef.current !== response.assignedAgent.id) {
+              announcedAgentIdRef.current = response.assignedAgent.id;
+              addMessage(
+                'system',
+                `🎯 ${response.assignedAgent.name} has joined the conversation and will be helping you today.`
+              );
+            }
+          } else if (!waitingAnnouncedRef.current) {
+            waitingAnnouncedRef.current = true;
+            addMessage('system', 'Please hold on — a customer care agent will be with you shortly.');
           }
           setIsEscalated(true);
         } else if (response.escalation) {
@@ -301,7 +332,7 @@ export function useChat() {
           if (response.ticketNumber) {
             addMessage(
               'system',
-              `📋 Ticket #${response.ticketNumber}\n\n⏳ Please hold on as we connect you to a customer care agent...`
+              `Ticket #${response.ticketNumber}\n\n Please hold on as we connect you to a customer care agent...`
             );
           }
           
@@ -309,7 +340,7 @@ export function useChat() {
           if (response.assignedAgent?.name) {
             addMessage(
               'system',
-              `🎯 You're being connected to ${response.assignedAgent.name}...`
+              `You're being connected to ${response.assignedAgent.name}...`
             );
           }
           
@@ -347,6 +378,8 @@ export function useChat() {
     const newSessionId = generateId();
     localStorage.setItem(STORAGE_KEY, newSessionId);
     backendMessageCountRef.current = 0;
+    announcedAgentIdRef.current = null;
+    waitingAnnouncedRef.current = false;
     setIsEscalated(false);
     setState((prev) => ({
       ...prev,
@@ -377,6 +410,8 @@ export function useChat() {
       const newSessionId = generateId();
       localStorage.setItem(STORAGE_KEY, newSessionId);
       backendMessageCountRef.current = 0;
+      announcedAgentIdRef.current = null;
+      waitingAnnouncedRef.current = false;
       setIsEscalated(false);
       setState((prev) => ({
         ...prev,
@@ -402,6 +437,8 @@ export function useChat() {
     try {
       const result = await closeTicketApi(state.sessionId);
       setIsEscalated(false);
+      announcedAgentIdRef.current = null;
+      waitingAnnouncedRef.current = false;
       lastKnownTicketStatusRef.current = 'closed';
       setState((prev) => ({ ...prev, ticketStatus: 'closed' }));
       addMessage('system', `✅ Ticket ${result.ticketNumber ? `#${result.ticketNumber} ` : ''}closed. Thanks for chatting with us — let us know if there's anything else!`);

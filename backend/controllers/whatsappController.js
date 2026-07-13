@@ -9,9 +9,10 @@
 
 const chatEngine = require('../services/chatEngine');
 const { sendWhatsAppMessage } = require('../services/whatsappService');
-const { logAnalytics, deleteConversationData } = require('../services/conversationService');
+const { logAnalytics, deleteConversationData, logMessage } = require('../services/conversationService');
 const { endSessionInMemory } = require('../services/sessionManager');
 const { markPendingEnd, isPendingEnd, clearPendingEnd } = require('../services/whatsappSessionState');
+const { closeTicketByCustomer } = require('../services/ticketService');
 const twilio = require('twilio');
 
 const { MessagingResponse } = twilio.twiml;
@@ -22,6 +23,14 @@ const { MessagingResponse } = twilio.twiml;
 // doesn't get misread as a request to end the conversation.
 const END_CHAT_PATTERN = /^(end chat|end conversation|end session|close chat|stop|cancel|bye|goodbye|quit|exit)[.!]?$/i;
 const AFFIRMATIVE_PATTERN = /^(yes|y|yep|yeah|confirm|confirmed|sure|ok|okay)[.!]?$/i;
+
+// ── Close-ticket intent detection ────────────────────────────────────────
+// WhatsApp has no widget UI, so there's no "Close ticket" button to tap the
+// way the web chat has — this text command is the WhatsApp equivalent.
+// Deliberately distinct from END_CHAT_PATTERN: closing a ticket only ends
+// the support ticket (permanently, matching the widget's behaviour), it
+// does NOT wipe the chat history / end the whole conversation session.
+const CLOSE_TICKET_PATTERN = /^(close ticket|close my ticket)[.!]?$/i;
 
 function buildEndConfirmationPrompt() {
   return "Are you sure you want to end this conversation? This will clear your chat history.\n\n" +
@@ -110,6 +119,31 @@ async function handleWhatsAppWebhook(req, res) {
         markPendingEnd(sessionId);
         await sendWhatsAppMessage(sessionId, buildEndConfirmationPrompt());
         return;
+      } else if (CLOSE_TICKET_PATTERN.test(message)) {
+        const ticket = await closeTicketByCustomer(sessionId);
+
+        if (!ticket) {
+          await sendWhatsAppMessage(sessionId, "You don't have an open ticket right now.");
+          return;
+        }
+
+        await logMessage(sessionId, 'system', 'Customer closed the ticket.', {
+          ticketId: ticket.id,
+          channel: 'whatsapp',
+        }).catch(() => {});
+
+        await logAnalytics(sessionId, 'ticket_closed_by_customer', {
+          ticketId: ticket.id,
+          ticketNumber: ticket.ticket_number,
+          channel: 'whatsapp',
+          timestamp: new Date().toISOString(),
+        }).catch(() => {});
+
+        await sendWhatsAppMessage(
+          sessionId,
+          `✅ Ticket ${ticket.ticket_number ? `#${ticket.ticket_number} ` : ''}closed. Thanks for chatting with us — send a new message anytime if you need more help!`
+        );
+        return;
       }
 
       const result = await chatEngine.processMessage({
@@ -136,6 +170,14 @@ async function handleWhatsAppWebhook(req, res) {
       // caught it, surface the notice right away instead of waiting up to
       // 60s for the next sweep tick.
       let outgoing = result.aiResponse;
+
+      // Tell WhatsApp customers about the text-command equivalent of the
+      // web widget's "Close ticket" button, right when their ticket is
+      // created — there's no button to show them here.
+      if (result.escalation) {
+        outgoing += '\n\n_Once you\'re all sorted, reply "close ticket" to close this support ticket._';
+      }
+
       if (result.sessionStatus?.warningNeeded) {
         const minutesLeft = Math.max(1, Math.round(result.sessionStatus.timeRemainingMs / 60000));
         outgoing += `\n\n⏰ _This conversation will time out in about ${minutesLeft} minute${minutesLeft === 1 ? '' : 's'} due to inactivity. Reply *end chat* to close it now, or just keep chatting._`;
