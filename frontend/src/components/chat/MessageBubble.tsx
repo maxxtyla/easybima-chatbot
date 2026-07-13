@@ -64,8 +64,7 @@ export function MessageBubble({ message, onReply }: MessageBubbleProps) {
       >
         {isAgent && (
           <span className="block text-[10px] uppercase tracking-wide font-semibold text-emerald-700 mb-1">
-            Live agent
-          </span>
+            LIVE AGENT          </span>
         )}
 
         {message.replyTo && (

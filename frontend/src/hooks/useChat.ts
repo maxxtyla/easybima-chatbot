@@ -229,7 +229,7 @@ export function useChat() {
       const wasTerminal = TERMINAL_TICKET_STATUSES.includes(lastKnownTicketStatusRef.current || '');
       const isTerminal = TERMINAL_TICKET_STATUSES.includes(ticket.ticketStatus || '');
       if (isTerminal && !wasTerminal && lastKnownTicketStatusRef.current !== null) {
-        addMessage('system', `✅ Your ticket ${ticket.ticketNumber ? `#${ticket.ticketNumber} ` : ''}has been marked as ${ticket.ticketStatus}. Thank you for chatting with us!`);
+        addMessage('system', ` Your ticket ${ticket.ticketNumber ? `#${ticket.ticketNumber} ` : ''}has been marked as ${ticket.ticketStatus}. Thank you for chatting with us!`);
         setIsEscalated(false);
         announcedAgentIdRef.current = null;
         waitingAnnouncedRef.current = false;
@@ -331,7 +331,7 @@ export function useChat() {
               announcedAgentIdRef.current = response.assignedAgent.id;
               addMessage(
                 'system',
-                `🎯 ${response.assignedAgent.name} has joined the conversation and will be helping you today.`
+                `${response.assignedAgent.name} has joined the conversation and will be helping you today.`
               );
             }
           } else if (!waitingAnnouncedRef.current) {
@@ -346,7 +346,7 @@ export function useChat() {
           if (response.ticketNumber) {
             addMessage(
               'system',
-              `Ticket #${response.ticketNumber}\n\n Please hold on as we connect you to a customer care agent...`
+              `Please hold on as we connect you to a customer care agent`
             );
           }
           
@@ -458,7 +458,7 @@ export function useChat() {
       waitingAnnouncedRef.current = false;
       lastKnownTicketStatusRef.current = 'closed';
       setState((prev) => ({ ...prev, ticketStatus: 'closed' }));
-      addMessage('system', `✅ Ticket ${result.ticketNumber ? `#${result.ticketNumber} ` : ''}closed. Thanks for chatting with us — let us know if there's anything else!`);
+      addMessage('system', ` Ticket ${result.ticketNumber ? `#${result.ticketNumber} ` : ''}closed. Thanks for chatting with us — let us know if there's anything else!`);
     } catch (error) {
       console.error('Failed to close ticket:', error);
       addMessage('system', "Sorry, we couldn't close your ticket right now. Please try again in a moment.");
