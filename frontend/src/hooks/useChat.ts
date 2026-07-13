@@ -112,6 +112,7 @@ export function useChat() {
               role: m.role,
               content: m.content,
               timestamp: m.timestamp ? new Date(m.timestamp).getTime() : Date.now(),
+              ...(m.metadata?.replyTo ? { replyTo: m.metadata.replyTo } : {}),
             }));
           backendMessageCountRef.current = convo.messages.length;
           setState((prev) => (prev.messages.length > 0 ? prev : { ...prev, messages: restored }));
@@ -182,12 +183,12 @@ export function useChat() {
     if (!state.sessionId) return;
     try {
       const convo = await getConversationHistory(state.sessionId);
-      const backendMessages: { role: string; content: string; timestamp?: string }[] = convo.messages || [];
+      const backendMessages: { role: string; content: string; timestamp?: string; metadata?: { replyTo?: ReplySnippet } }[] = convo.messages || [];
       if (backendMessages.length > backendMessageCountRef.current) {
         const newOnes = backendMessages.slice(backendMessageCountRef.current);
         newOnes
           .filter((m) => m.role === 'agent')
-          .forEach((m) => addMessage('agent', m.content));
+          .forEach((m) => addMessage('agent', m.content, m.metadata?.replyTo));
         backendMessageCountRef.current = backendMessages.length;
       }
     } catch {

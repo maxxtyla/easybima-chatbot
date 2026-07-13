@@ -36,10 +36,18 @@ export interface Agent {
   fullName: string;
 }
 
+export interface ReplySnippet {
+  id: string;
+  role: string;
+  content: string;
+}
+
 export interface TicketMessage {
+  id?: string;
   role: string;
   content: string;
   created_at: string;
+  metadata?: { replyTo?: ReplySnippet } | null;
 }
 
 export interface TicketEvent {
@@ -143,9 +151,13 @@ export async function addTicketNote(id: string, note: string): Promise<{ success
 
 export async function sendTicketMessage(
   id: string,
-  content: string
+  content: string,
+  replyToMessageId?: string
 ): Promise<{ message: TicketMessage; ticket: Ticket; deliveryWarning?: string }> {
-  return staffFetch(`/staff/tickets/${id}/messages`, { method: 'POST', body: JSON.stringify({ content }) });
+  return staffFetch(`/staff/tickets/${id}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({ content, ...(replyToMessageId ? { replyToMessageId } : {}) }),
+  });
 }
 
 export interface AgentStats {

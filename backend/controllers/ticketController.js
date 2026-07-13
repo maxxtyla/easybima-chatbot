@@ -198,14 +198,14 @@ async function addNote(req, res, next) {
  */
 async function sendMessage(req, res, next) {
   try {
-    const { content } = req.body;
+    const { content, replyToMessageId } = req.body;
     if (!content || !content.trim()) {
       return res.status(400).json({ error: 'Validation Error', message: 'content is required.' });
     }
 
     let result;
     try {
-      result = await ticketService.sendAgentMessage(req.params.id, req.agent.sub, content.trim());
+      result = await ticketService.sendAgentMessage(req.params.id, req.agent.sub, content.trim(), replyToMessageId || null);
     } catch (sendError) {
       if (['TICKET_CLOSED', 'NOT_ACCEPTED', 'ASSIGNED_TO_OTHER'].includes(sendError.code)) {
         return res.status(sendError.status || 409).json({ error: sendError.code, message: sendError.message });
@@ -214,9 +214,23 @@ async function sendMessage(req, res, next) {
     }
     if (!result) return res.status(404).json({ error: 'Not Found', message: 'Ticket not found.' });
 
+    const replySnippet = result.message.metadata?.replyTo;
+    if (replySnippet) {
+      console.log(`↩️ [TICKET REPLY] ticketId=${req.params.id} agent replied to messageId=${replySnippet.id} (role=${replySnippet.role})`);
+    }
+
     if (result.ticket.channel === 'whatsapp') {
+      // Twilio's REST send API (services/whatsappService.js) has no native
+      // "quote this message" support for outbound sends — that's only
+      // available via WhatsApp's own client UI for messages sent through
+      // it, not for arbitrary messages pushed via the API. As a practical
+      // stand-in so the customer still sees what's being replied to, quote
+      // the original snippet as plain text ahead of the agent's reply.
+      const outgoing = replySnippet
+        ? `↩️ _Replying to: "${replySnippet.content}"_\n\n${content.trim()}`
+        : content.trim();
       try {
-        await sendWhatsAppMessage(result.ticket.session_id, content.trim());
+        await sendWhatsAppMessage(result.ticket.session_id, outgoing);
       } catch (sendError) {
         // The message is already saved and visible in the transcript —
         // don't roll that back over a delivery failure, just surface it

@@ -209,7 +209,7 @@ async function getTicketMessages(ticketId) {
   if (!ticket) return null;
 
   const liveResult = await pool.query(
-    `SELECT role, content, created_at FROM messages
+    `SELECT id, role, content, created_at, metadata FROM messages
      WHERE session_id = $1 ORDER BY created_at ASC`,
     [ticket.session_id]
   );
@@ -543,8 +543,20 @@ async function getLatestTicketWithAgent(sessionId) {
  * advances status open->assigned->in_progress so the queue reflects it's
  * being worked. Delivery to the customer's actual channel (WhatsApp REST
  * send) is the controller's job — this just persists state.
+ *
+ * `replyToMessageId`, when provided, mirrors the customer widget's own
+ * "reply to a specific message" feature (see InputBar/ReplyPreview on the
+ * frontend) for the staff side. The referenced message (scoped to this
+ * ticket's session, so an agent can't reference a message from someone
+ * else's conversation) is looked up and a small snippet of it — id, role,
+ * a truncated preview of its content — is stored alongside the new
+ * message's metadata. The customer-facing poll/history endpoints already
+ * return `metadata`, so the widget (and, for WhatsApp, a text-quoted
+ * prefix built by the controller) can show exactly which message the
+ * agent was responding to, the same way the customer's own replies show
+ * up quoted in their chat.
  */
-async function sendAgentMessage(ticketId, agentId, content) {
+async function sendAgentMessage(ticketId, agentId, content, replyToMessageId = null) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -598,10 +610,32 @@ async function sendAgentMessage(ticketId, agentId, content) {
       [ticket.session_id]
     );
 
+    // Look up the message being replied to, if any. Scoped to this
+    // ticket's own session_id so an agent can't reference (and thus leak
+    // a snippet of) a message from an unrelated conversation.
+    let replyTo = null;
+    if (replyToMessageId) {
+      const targetResult = await client.query(
+        `SELECT id, role, content FROM messages WHERE id = $1 AND session_id = $2`,
+        [replyToMessageId, ticket.session_id]
+      );
+      const target = targetResult.rows[0];
+      if (target) {
+        replyTo = {
+          id: target.id,
+          role: target.role,
+          content: target.content.length > 300 ? `${target.content.slice(0, 300)}…` : target.content,
+        };
+      }
+      // If the target message wasn't found (e.g. stale UI state from
+      // before a reload), just send as a normal, non-reply message rather
+      // than failing the whole send.
+    }
+
     const messageResult = await client.query(
       `INSERT INTO messages (session_id, role, content, metadata)
        VALUES ($1, 'agent', $2, $3) RETURNING *`,
-      [ticket.session_id, content, JSON.stringify({ agentId, ticketId })]
+      [ticket.session_id, content, JSON.stringify({ agentId, ticketId, ...(replyTo ? { replyTo } : {}) })]
     );
 
     const nextStatus =
@@ -619,7 +653,7 @@ async function sendAgentMessage(ticketId, agentId, content) {
 
     await logTicketEvent(client, {
       ticketId, actorType: 'agent', actorId: agentId,
-      eventType: 'message_sent', eventData: { preview: content.slice(0, 140) },
+      eventType: 'message_sent', eventData: { preview: content.slice(0, 140), repliedToMessageId: replyTo?.id || null },
     });
 
     await client.query('COMMIT');

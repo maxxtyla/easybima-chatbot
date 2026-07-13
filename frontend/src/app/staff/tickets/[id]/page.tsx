@@ -18,6 +18,7 @@ import {
   type TicketStatus,
   type TicketPriority,
   type Agent,
+  type ReplySnippet,
 } from '@/lib/staffApi';
 
 const TERMINAL_STATUSES: TicketStatus[] = ['resolved', 'closed'];
@@ -56,6 +57,7 @@ export default function TicketDetailPage() {
   const [isSavingNote, setIsSavingNote] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
+  const [replyTo, setReplyTo] = useState<ReplySnippet | null>(null);
   const [isSendingReply, setIsSendingReply] = useState(false);
   const [isAccepting, setIsAccepting] = useState(false);
   const [deliveryWarning, setDeliveryWarning] = useState<string | null>(null);
@@ -126,8 +128,9 @@ export default function TicketDetailPage() {
     setIsSendingReply(true);
     setDeliveryWarning(null);
     try {
-      const result = await sendTicketMessage(ticket.id, replyText.trim());
+      const result = await sendTicketMessage(ticket.id, replyText.trim(), replyTo?.id);
       setReplyText('');
+      setReplyTo(null);
       if (result.deliveryWarning) setDeliveryWarning(result.deliveryWarning);
       await loadTicket();
     } catch (err) {
@@ -245,19 +248,57 @@ export default function TicketDetailPage() {
             {messages.map((m, i) => {
               const isUser = m.role === 'user';
               const isAgent = m.role === 'agent';
+              const replySnippet = m.metadata?.replyTo;
+              // Only user/customer messages have a real DB id we can
+              // reliably reply to in this transcript view (bot/system rows
+              // may come from the pre-ticket snapshot without one) — that
+              // mirrors the customer widget, which only offers the reply
+              // affordance on messages it can meaningfully quote.
+              const canReplyTo = !!m.id;
               return (
-                <div key={i} className={`flex ${isUser ? 'justify-start' : 'justify-end'}`}>
+                <div
+                  key={m.id || i}
+                  className={`group flex items-end gap-1 ${isUser ? 'justify-start' : 'justify-end'}`}
+                >
+                  {!isUser && canReplyTo && (
+                    <button
+                      type="button"
+                      onClick={() => setReplyTo({ id: m.id!, role: m.role, content: m.content })}
+                      aria-label="Reply to this message"
+                      className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity flex-shrink-0 mb-1 w-6 h-6 rounded-full bg-white border border-neutral-200 text-neutral-500 hover:text-cic-red hover:border-cic-red flex items-center justify-center shadow-sm"
+                    >
+                      ↩
+                    </button>
+                  )}
                   <div
                     className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${
                       isUser ? 'bg-neutral-100 text-cic-gray' : isAgent ? 'bg-emerald-600 text-white' : 'bg-cic-red text-white'
                     }`}
                   >
                     {isAgent && <p className="text-[10px] uppercase tracking-wide opacity-80 mb-0.5">Agent reply</p>}
+                    {replySnippet && (
+                      <div className="mb-1.5 pl-2 border-l-2 border-white/40 bg-black/10 rounded-r text-xs py-1 pr-2">
+                        <p className="font-semibold opacity-90">
+                          {replySnippet.role === 'user' ? 'Replying to customer' : replySnippet.role === 'agent' ? 'Replying to agent' : 'Replying to Bima'}
+                        </p>
+                        <p className="truncate opacity-80">{replySnippet.content}</p>
+                      </div>
+                    )}
                     <p>{m.content}</p>
                     <p className={`text-[10px] mt-1 ${isUser ? 'text-neutral-400' : isAgent ? 'text-emerald-100' : 'text-red-100'}`}>
                       {new Date(m.created_at).toLocaleString()}
                     </p>
                   </div>
+                  {isUser && canReplyTo && (
+                    <button
+                      type="button"
+                      onClick={() => setReplyTo({ id: m.id!, role: m.role, content: m.content })}
+                      aria-label="Reply to this message"
+                      className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity flex-shrink-0 mb-1 w-6 h-6 rounded-full bg-white border border-neutral-200 text-neutral-500 hover:text-cic-red hover:border-cic-red flex items-center justify-center shadow-sm"
+                    >
+                      ↩
+                    </button>
+                  )}
                 </div>
               );
             })}
@@ -307,6 +348,24 @@ export default function TicketDetailPage() {
                 {deliveryWarning && (
                   <p className="text-xs text-orange-700 bg-orange-50 rounded-md px-3 py-2 mb-2">{deliveryWarning}</p>
                 )}
+                {replyTo && (
+                  <div className="flex items-center gap-2 mb-2 pl-3 pr-2 py-1.5 rounded-md bg-red-50 border-l-2 border-cic-red">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[11px] font-semibold text-cic-red">
+                        Replying to {replyTo.role === 'user' ? 'customer' : replyTo.role === 'agent' ? 'agent' : 'Bima'}
+                      </p>
+                      <p className="text-xs text-neutral-600 truncate">{replyTo.content}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setReplyTo(null)}
+                      aria-label="Cancel reply"
+                      className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full text-neutral-400 hover:text-cic-red hover:bg-white transition-colors"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )}
                 <div className="flex gap-2">
                   <textarea
                     value={replyText}
@@ -316,9 +375,13 @@ export default function TicketDetailPage() {
                         e.preventDefault();
                         handleSendReply();
                       }
+                      if (e.key === 'Escape' && replyTo) {
+                        e.preventDefault();
+                        setReplyTo(null);
+                      }
                     }}
                     rows={2}
-                    placeholder="Reply to the customer…"
+                    placeholder={replyTo ? 'Type your reply…' : 'Reply to the customer…'}
                     className="flex-1 rounded-lg border border-neutral-300 px-3 py-2 text-sm resize-none"
                   />
                   <button

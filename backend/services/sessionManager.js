@@ -208,7 +208,7 @@ async function getConversationWithExpirationCheck(sessionId) {
     // still bounding the query; claudeService still only feeds the last 8
     // of whatever comes back into the LLM call.
     const messagesResult = await pool.query(
-      `SELECT id, role, content, created_at
+      `SELECT id, role, content, created_at, metadata
        FROM messages
        WHERE session_id = $1
        ORDER BY created_at DESC
