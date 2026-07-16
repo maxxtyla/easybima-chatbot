@@ -16,6 +16,10 @@ export interface Message {
   isLoading?: boolean
   /** Present when this message was sent as a reply to an earlier one. */
   replyTo?: ReplySnippet
+  /** For role 'agent' — the name of the live agent who sent this reply,
+   *  snapshotted at the time the message arrived so the widget can show
+   *  "Jane" instead of a generic "Live agent" label. */
+  agentName?: string
 }
 
 export interface ChatResponse {

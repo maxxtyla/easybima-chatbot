@@ -40,14 +40,19 @@ export function MessageBubble({ message, onReply }: MessageBubbleProps) {
 
       {/* Avatar — Bima for the bot, a distinct badge for a human agent */}
       {!isUser && !isSystem && (
-        <div
-          className={cn(
-            'flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center mr-1 mb-1 self-end',
-            isAgent ? 'bg-emerald-600' : 'bg-cic-red'
-          )}
-        >
-          <span className="text-white text-xs font-bold">{isAgent ? 'A' : 'B'}</span>
-        </div>
+        isAgent ? (
+          <div className="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center mr-1 mb-1 self-end bg-emerald-600">
+            <span className="text-white text-xs font-bold">
+              {message.agentName?.trim()?.[0]?.toUpperCase() || 'A'}
+            </span>
+          </div>
+        ) : (
+          <img
+            src="/bima-avatar.svg"
+            alt="Bima"
+            className="flex-shrink-0 w-7 h-7 rounded-full mr-1 mb-1 self-end"
+          />
+        )
       )}
 
       <div
@@ -64,7 +69,8 @@ export function MessageBubble({ message, onReply }: MessageBubbleProps) {
       >
         {isAgent && (
           <span className="block text-[10px] uppercase tracking-wide font-semibold text-emerald-700 mb-1">
-            LIVE AGENT          </span>
+            {message.agentName || 'Live agent'}
+          </span>
         )}
 
         {message.replyTo && (

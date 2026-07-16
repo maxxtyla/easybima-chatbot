@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { listTickets, getMe, logout, type Ticket, type TicketStatus, type TicketPriority, type Agent } from '@/lib/staffApi';
+import { playNotificationSound, startTitleFlash } from '@/lib/notificationSound';
 
 const STATUS_OPTIONS: TicketStatus[] = ['open', 'assigned', 'in_progress', 'pending_customer', 'resolved', 'closed'];
 const PRIORITY_OPTIONS: TicketPriority[] = ['urgent', 'high', 'medium', 'low'];
@@ -46,6 +47,17 @@ export default function TicketQueuePage() {
   const [priority, setPriority] = useState<TicketPriority | ''>('');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Tracks each ticket's updated_at as of the last poll so we can spot
+  // ones that changed since (typically a new customer message landing) —
+  // a lightweight, backend-agnostic proxy for "new activity" without
+  // needing a dedicated unread-count field.
+  const lastSeenUpdatedAtRef = useRef<Map<string, string>>(new Map());
+  const isFirstLoadRef = useRef(true);
+  // Persistent "new message" flag per ticket — unlike a brief highlight,
+  // this stays set until the agent actually opens that ticket, so it
+  // can't be missed by glancing at the queue right after it fires.
+  const [unreadTicketIds, setUnreadTicketIds] = useState<Set<string>>(new Set());
+  const stopTitleFlashRef = useRef<(() => void) | null>(null);
 
   const loadTickets = useCallback(async () => {
     setIsLoading(true);
@@ -58,6 +70,40 @@ export default function TicketQueuePage() {
       });
       setTickets(result.tickets);
       setTotal(result.total);
+
+      const previouslySeen = lastSeenUpdatedAtRef.current;
+      const nextSeen = new Map<string, string>();
+      const changedIds: string[] = [];
+
+      for (const ticket of result.tickets) {
+        nextSeen.set(ticket.id, ticket.updated_at);
+        const prevUpdatedAt = previouslySeen.get(ticket.id);
+        if (!isFirstLoadRef.current && prevUpdatedAt && prevUpdatedAt !== ticket.updated_at) {
+          changedIds.push(ticket.id);
+        }
+      }
+      lastSeenUpdatedAtRef.current = nextSeen;
+
+      if (isFirstLoadRef.current) {
+        isFirstLoadRef.current = false;
+      } else if (changedIds.length > 0) {
+        playNotificationSound();
+        // Add to (not replace) the unread set — a ticket already flagged
+        // unread from an earlier poll stays flagged, and newly-changed
+        // ones join it, until each is individually opened.
+        setUnreadTicketIds((prev) => {
+          const next = new Set(prev);
+          changedIds.forEach((id) => next.add(id));
+          return next;
+        });
+
+        if (document.visibilityState !== 'visible') {
+          stopTitleFlashRef.current?.();
+          stopTitleFlashRef.current = startTitleFlash(
+            changedIds.length === 1 ? '💬 New message' : `💬 ${changedIds.length} tickets updated`
+          );
+        }
+      }
     } catch (err) {
       if ((err as { status?: number }).status === 401) {
         router.push('/staff/login');
@@ -76,6 +122,12 @@ export default function TicketQueuePage() {
   }, [router]);
 
   useEffect(() => {
+    return () => {
+      stopTitleFlashRef.current?.();
+    };
+  }, []);
+
+  useEffect(() => {
     loadTickets();
     // Simple polling backstop — swap for websockets later if the queue
     // needs true real-time updates across multiple agents.
@@ -88,11 +140,32 @@ export default function TicketQueuePage() {
     router.push('/staff/login');
   }
 
+  function openTicket(ticketId: string) {
+    if (unreadTicketIds.has(ticketId)) {
+      setUnreadTicketIds((prev) => {
+        const next = new Set(prev);
+        next.delete(ticketId);
+        return next;
+      });
+    }
+    router.push(`/staff/tickets/${ticketId}`);
+  }
+
   return (
     <div className="min-h-screen bg-neutral-50">
       <header className="bg-cic-white border-b border-neutral-200 px-6 py-4 flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-semibold text-cic-gray">Customer Care Tickets</h1>
+          <h1 className="text-lg font-semibold text-cic-gray flex items-center gap-2">
+            Customer Care Tickets
+            {unreadTicketIds.size > 0 && (
+              <span
+                className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full bg-cic-red text-white text-xs font-semibold animate-pulse"
+                aria-label={`${unreadTicketIds.size} ticket${unreadTicketIds.size === 1 ? '' : 's'} with new messages`}
+              >
+                {unreadTicketIds.size}
+              </span>
+            )}
+          </h1>
           {agent && <p className="text-sm text-neutral-500">Signed in as {agent.fullName} · {agent.role}</p>}
         </div>
         <div className="flex items-center gap-4">
@@ -149,13 +222,26 @@ export default function TicketQueuePage() {
               <tbody className="divide-y divide-neutral-100">
                 {tickets.map((ticket) => {
                   const sla = formatSlaCountdown(ticket.sla_due_at);
+                  const isUnread = unreadTicketIds.has(ticket.id);
                   return (
                     <tr
                       key={ticket.id}
-                      onClick={() => router.push(`/staff/tickets/${ticket.id}`)}
-                      className="cursor-pointer hover:bg-neutral-50"
+                      onClick={() => openTicket(ticket.id)}
+                      className={`cursor-pointer hover:bg-neutral-50 transition-colors ${isUnread ? 'bg-emerald-50' : ''}`}
                     >
-                      <td className="px-4 py-3 font-medium text-cic-gray whitespace-nowrap">{ticket.ticket_number}</td>
+                      <td className="px-4 py-3 font-medium text-cic-gray whitespace-nowrap">
+                        <span className="flex items-center gap-1.5">
+                          {isUnread && (
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0 animate-pulse" aria-label="New message" />
+                          )}
+                          {ticket.ticket_number}
+                          {isUnread && (
+                            <span className="inline-flex items-center rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5">
+                              New
+                            </span>
+                          )}
+                        </span>
+                      </td>
                       <td className="px-4 py-3 text-neutral-700 whitespace-nowrap">
                         {ticket.customer_name || ticket.customer_phone || '—'}
                         <span className="block text-xs text-neutral-400">{ticket.channel}</span>

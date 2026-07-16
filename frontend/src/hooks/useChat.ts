@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Message, ChatState, ReplySnippet } from '@/types/chat';
+import { Message, ChatState, ReplySnippet, AssignedAgent } from '@/types/chat';
 import { generateId } from '@/lib/utils';
 import { sendMessage, keepAliveSession, endSession, getConversationHistory, getTicketStatus, closeTicket as closeTicketApi } from '@/lib/api';
+import { playNotificationSound } from '@/lib/notificationSound';
 
 const STORAGE_KEY = 'cic-chat-session';
 
@@ -56,6 +57,10 @@ export function useChat() {
   // resolved/closed transition (done from the staff side, e.g. the agent
   // closes it) only gets announced once.
   const lastKnownTicketStatusRef = useRef<string | null>(null);
+  // Mirrors state.assignedAgent so addMessage() can stamp each live-agent
+  // reply with the agent's name at the moment it arrives, without needing
+  // every call site to thread the name through separately.
+  const assignedAgentRef = useRef<AssignedAgent | null>(null);
 
   const clearWrapUpTimer = useCallback(() => {
     if (wrapUpTimerRef.current) {
@@ -113,6 +118,7 @@ export function useChat() {
               content: m.content,
               timestamp: m.timestamp ? new Date(m.timestamp).getTime() : Date.now(),
               ...(m.metadata?.replyTo ? { replyTo: m.metadata.replyTo } : {}),
+              ...(m.role === 'agent' && ticket?.assignedAgent?.name ? { agentName: ticket.assignedAgent.name } : {}),
             }));
           backendMessageCountRef.current = convo.messages.length;
           setState((prev) => (prev.messages.length > 0 ? prev : { ...prev, messages: restored }));
@@ -120,6 +126,7 @@ export function useChat() {
 
         if (ticket?.hasActiveTicket) {
           announcedAgentIdRef.current = ticket.assignedAgent?.id || null;
+          assignedAgentRef.current = ticket.assignedAgent || null;
           lastKnownTicketStatusRef.current = ticket.ticketStatus;
           setIsEscalated(true);
           setState((prev) => ({
@@ -151,8 +158,19 @@ export function useChat() {
         content,
         timestamp: Date.now(),
         ...(replyTo ? { replyTo } : {}),
+        // Stamp live-agent replies with whoever is currently assigned, so
+        // the bubble can show "Jane" instead of a generic "Live agent" tag.
+        ...(role === 'agent' && assignedAgentRef.current?.name ? { agentName: assignedAgentRef.current.name } : {}),
       };
       setState((prev) => ({ ...prev, messages: [...prev.messages, message] }));
+
+      // Chime on any response landing — from the AI assistant or a live
+      // agent — so the customer notices even if they've stepped away from
+      // the widget. Mirrors the same sound used on the staff side.
+      if (role === 'assistant' || role === 'agent') {
+        playNotificationSound();
+      }
+
       return message;
     },
     []
@@ -235,6 +253,7 @@ export function useChat() {
         waitingAnnouncedRef.current = false;
       }
       lastKnownTicketStatusRef.current = ticket.ticketStatus;
+      assignedAgentRef.current = ticket.assignedAgent || null;
 
       setState((prev) => ({
         ...prev,
@@ -299,6 +318,7 @@ export function useChat() {
 
         // Store ticket and agent info if available
         if (response.ticketNumber || response.assignedAgent || response.ticketStatus || response.ticketCreatedAt) {
+          if (response.assignedAgent) assignedAgentRef.current = response.assignedAgent;
           setState((prev) => ({
             ...prev,
             ticketNumber: response.ticketNumber || prev.ticketNumber,
@@ -393,6 +413,7 @@ export function useChat() {
     localStorage.setItem(STORAGE_KEY, newSessionId);
     backendMessageCountRef.current = 0;
     announcedAgentIdRef.current = null;
+    assignedAgentRef.current = null;
     waitingAnnouncedRef.current = false;
     setIsEscalated(false);
     setState((prev) => ({
@@ -427,6 +448,7 @@ export function useChat() {
       localStorage.setItem(STORAGE_KEY, newSessionId);
       backendMessageCountRef.current = 0;
       announcedAgentIdRef.current = null;
+      assignedAgentRef.current = null;
       waitingAnnouncedRef.current = false;
       setIsEscalated(false);
       setState((prev) => ({

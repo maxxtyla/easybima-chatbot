@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
+import { playNotificationSound, startTitleFlash } from '@/lib/notificationSound';
 import {
   getTicket,
   getTicketMessages,
@@ -61,6 +62,15 @@ export default function TicketDetailPage() {
   const [isSendingReply, setIsSendingReply] = useState(false);
   const [isAccepting, setIsAccepting] = useState(false);
   const [deliveryWarning, setDeliveryWarning] = useState<string | null>(null);
+  // New-message alert (sound + brief banner) when the customer sends a
+  // message while this ticket is open. Tracks the last message id we've
+  // already alerted on so a poll that just re-confirms the same messages
+  // (or echoes the agent's own reply back) doesn't re-trigger the sound.
+  const lastSeenMessageIdRef = useRef<string | null>(null);
+  const isFirstMessageLoadRef = useRef(true);
+  const [showNewMessageBanner, setShowNewMessageBanner] = useState(false);
+  const bannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stopTitleFlashRef = useRef<(() => void) | null>(null);
 
   const loadTicket = useCallback(async () => {
     try {
@@ -122,6 +132,48 @@ export default function TicketDetailPage() {
     }, 5000);
     return () => clearInterval(interval);
   }, [ticket?.status, ticketId]);
+
+  // Fires the new-message alert whenever the transcript grows with a
+  // message from the customer (role 'user') that we haven't already
+  // alerted on. Skipped on the very first load of a ticket so opening an
+  // existing conversation doesn't immediately play a sound for history
+  // that's already there.
+  useEffect(() => {
+    if (messages.length === 0) return;
+
+    const latest = messages[messages.length - 1];
+    const latestKey = latest.id || `${latest.created_at}:${latest.content}`;
+
+    if (isFirstMessageLoadRef.current) {
+      isFirstMessageLoadRef.current = false;
+      lastSeenMessageIdRef.current = latestKey;
+      return;
+    }
+
+    if (latestKey === lastSeenMessageIdRef.current) return;
+    lastSeenMessageIdRef.current = latestKey;
+
+    if (latest.role === 'user') {
+      playNotificationSound();
+
+      setShowNewMessageBanner(true);
+      if (bannerTimeoutRef.current) clearTimeout(bannerTimeoutRef.current);
+      bannerTimeoutRef.current = setTimeout(() => setShowNewMessageBanner(false), 4000);
+
+      // Only flash the tab title if the agent isn't already looking at it.
+      if (document.visibilityState !== 'visible') {
+        stopTitleFlashRef.current?.();
+        stopTitleFlashRef.current = startTitleFlash('💬 New message');
+      }
+    }
+  }, [messages]);
+
+  useEffect(() => {
+    return () => {
+      if (bannerTimeoutRef.current) clearTimeout(bannerTimeoutRef.current);
+      stopTitleFlashRef.current?.();
+    };
+  }, []);
 
   async function handleSendReply() {
     if (!ticket || !replyText.trim() || isSendingReply) return;
@@ -243,6 +295,12 @@ export default function TicketDetailPage() {
               </span>
             )}
           </div>
+          {showNewMessageBanner && (
+            <div className="mb-3 flex items-center gap-2 rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs font-medium text-emerald-800 animate-pulse">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
+              New message from customer
+            </div>
+          )}
           <div className="space-y-3 max-h-[60vh] overflow-y-auto">
             {messages.length === 0 && <p className="text-sm text-neutral-400">No messages available.</p>}
             {messages.map((m, i) => {

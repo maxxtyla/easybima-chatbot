@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Bima, CIC Insurance AI assistant">
+  <title>Bima — CIC AI Assistant</title>
+
+  <!-- Background badge -->
+  <circle cx="50" cy="50" r="48" fill="#AC202D" />
+
+  <!-- Antenna -->
+  <line x1="50" y1="24" x2="50" y2="36" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" />
+  <circle cx="50" cy="20" r="4.5" fill="#FFFFFF" />
+  <circle cx="50" cy="20" r="2" fill="#D63944" />
+
+  <!-- Hair buns / pigtails, signalling a female-presenting assistant -->
+  <circle cx="22" cy="46" r="10" fill="#FFFFFF" />
+  <circle cx="78" cy="46" r="10" fill="#FFFFFF" />
+  <path d="M16 42 Q22 38 28 42" fill="none" stroke="#D63944" stroke-width="2" stroke-linecap="round" opacity="0.55" />
+  <path d="M72 42 Q78 38 84 42" fill="none" stroke="#D63944" stroke-width="2" stroke-linecap="round" opacity="0.55" />
+
+  <!-- Bow accessory at the base of the antenna -->
+  <path d="M42 33 L49 37 L42 41 Z" fill="#FFFFFF" />
+  <path d="M58 33 L51 37 L58 41 Z" fill="#FFFFFF" />
+  <circle cx="50" cy="37" r="2.4" fill="#D63944" />
+
+  <!-- Head / face plate -->
+  <rect x="26" y="36" width="48" height="42" rx="19" fill="#FFFFFF" />
+
+  <!-- Cheeks -->
+  <circle cx="35" cy="65" r="3.2" fill="#D63944" opacity="0.45" />
+  <circle cx="65" cy="65" r="3.2" fill="#D63944" opacity="0.45" />
+
+  <!-- Eyes -->
+  <rect x="38" y="55" width="7" height="9" rx="3.5" fill="#AC202D" />
+  <rect x="55" y="55" width="7" height="9" rx="3.5" fill="#AC202D" />
+
+  <!-- Smile -->
+  <path d="M41 69 Q50 76 59 69" fill="none" stroke="#AC202D" stroke-width="3" stroke-linecap="round" />
+
+  <!-- Collar / shoulders hint -->
+  <path d="M18 92 Q50 76 82 92 L82 100 L18 100 Z" fill="#FFFFFF" opacity="0.14" />
+</svg>
