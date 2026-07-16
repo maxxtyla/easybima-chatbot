@@ -81,7 +81,7 @@ async function updateStatus(req, res, next) {
       try {
         await sendWhatsAppMessage(
           ticket.session_id,
-          `✅ Your ticket ${ticket.ticket_number ? `#${ticket.ticket_number} ` : ''}has been marked as *${status}*. Thank you for chatting with CIC Insurance — message us anytime if you need more help!`
+          `✅ Your ticket ${ticket.ticket_number ? `${ticket.ticket_number} ` : ''}has been marked as *${status}*. Thank you for chatting with CIC Insurance — message us anytime if you need more help!`
         );
         console.log(`📲 [TICKET CLOSE][WHATSAPP] ticketId=${ticket.id} closure notice delivered`);
       } catch (sendError) {
@@ -159,7 +159,7 @@ async function accept(req, res, next) {
         const agentName = req.agent.fullName || 'One of our agents';
         await sendWhatsAppMessage(
           ticket.session_id,
-          `🎯 ${agentName} has joined ticket ${ticket.ticket_number ? `#${ticket.ticket_number} ` : ''}and will be helping you now.`
+          `Your chat has been transferred to  ${agentName} ${ticket.ticket_number ? `${ticket.ticket_number} ` : ''}.`
         );
       } catch (sendError) {
         console.error('❌ Failed to notify WhatsApp customer of ticket acceptance:', sendError.message);

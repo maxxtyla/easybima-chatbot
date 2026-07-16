@@ -7,6 +7,7 @@
 //   - insurance_products   -> wantsProducts
 //   - branches             -> wantsBranches
 //   - company_knowledge    -> wantsCompanyInfo
+//   - claims               -> wantsClaims
 //
 // `analytics`, `conversations`, and `messages` are never part of retrieval
 // routing — they're logging/history tables, not RAG sources, and are
@@ -52,7 +53,10 @@ const PRODUCT_KEYWORDS = [
   'private motor', 'monthly', 'vehicle', 'motor insurance', 'easy bima', 'installment',
   'cargo','transit','goods','merchandise','sea','air','rail','road','ICC-A','import','export','shipping',
   'commercial','vehicle','third party','bodily injury','property damage','driver','passengers','car','road',
-  'student','personal accident','bodily injury','work insurance','accidental','violent','industry attachment insurance'
+  'student','personal accident','bodily injury','work insurance','accidental','violent','industry attachment insurance',
+  'saving', 'savings', 'save', 'savings plan', 'savings account', 'savings product',
+  'education savings', 'child savings', 'goal savings', 'savings and investment',
+  'endowment', 'endowment policy', 'retirement savings', 'save money', 'saving plan',
 ];
 
 const COMPANY_KEYWORDS = [
@@ -66,14 +70,34 @@ const COMPANY_KEYWORDS = [
   'who is cic', 'staff', 'directors', 'leaders', 'leadership Team', 'organization structure', 'CEO', 'managing directors'
 ];
 
-// FAQ is the general support/process table: claims, renewals, cancellations,
+// FAQ is the general support/process table: , renewals, cancellations,
 // payments, complaints, "how do I..." questions. It's also the safe default
 // fallback when nothing else matches (see below).
 const FAQ_KEYWORDS = [
-  'how do i', 'how to', 'claim', 'claims', 'renew', 'renewal', 'cancel',
+  'how do i', 'how to', 'renew', 'renewal', 'cancel',
   'cancellation', 'pay', 'payment', 'refund', 'complaint', 'complain',
-  'document', 'documents', 'requirements', 'process', 'steps', 'apply',
+  'document', 'documents', 'requirements', 'steps', 'apply',
   'application', 'help', 'faq', 'question',
+];
+
+// CLAIMS is its own dedicated table (schema: claims) covering anything
+// claim-specific — filing, tracking, requirements, documents, payouts, etc.
+// This is intentionally exclusive of FAQ/company_knowledge: if someone is
+// asking about a claim, the claims table is the authoritative source and
+// we don't want the LLM's context diluted/contradicted by generic FAQ or
+// company-knowledge rows that happen to also mention the word "claim".
+const CLAIMS_KEYWORDS = [
+  'claim', 'claims', 'file a claim', 'lodge a claim', 'make a claim',
+  'report a claim', 'submit a claim', 'raise a claim', 'open a claim',
+  'claim status', 'track my claim', 'track claim', 'claim tracking',
+  'claim number', 'claim reference', 'claim form', 'claim requirements',
+  'claim documents', 'claim process', 'how to claim', 'claim procedure',
+  'motor claim', 'accident claim', 'medical claim', 'death claim',
+  'funeral claim', 'travel claim', 'wiba claim', 'theft claim',
+  'fire claim', 'burglary claim', 'claim payout', 'claim settlement',
+  'claim rejected', 'claim denied', 'claim approved', 'claim delay',
+  'assessor', 'loss adjuster', 'excess', 'claim excess', 'accident report',
+  'police abstract', 'garage', 'towing', 'writeoff', 'write-off',
 ];
 
 function matchesAny(lowerMsg, keywordList) {
@@ -143,6 +167,7 @@ function matchesLocation(lowerMsg, locationTerms) {
  *   wantsProducts:    boolean
  *   wantsBranches:    boolean
  *   wantsCompanyInfo: boolean
+ *   wantsClaims:      boolean
  *   cityHint:         string|null  // parsed city, e.g. "near Mombasa" -> "Mombasa"
  * }
  *
@@ -150,6 +175,14 @@ function matchesLocation(lowerMsg, locationTerms) {
  * we default wantsFAQ + wantsCompanyInfo to true. Those two hold the most
  * general-purpose content, so they're the cheapest, safest fallback for
  * ambiguous input rather than querying every table blindly.
+ *
+ * Claims are handled as an override, not just another flag: when
+ * wantsClaims is true, wantsFAQ and wantsCompanyInfo are forced back to
+ * false (even if a FAQ/company keyword also happened to match) so the LLM
+ * is grounded in the `claims` table instead of getting mixed/contradicted
+ * by generic FAQ or company-knowledge rows. wantsProducts/wantsBranches are
+ * left untouched since those are still relevant alongside a claim (e.g.
+ * "where's my nearest branch to file a motor claim").
  *
  * NOTE: now async — wantsBranches also checks the message against known
  * branch city/region/keyword tags (cached from the DB), not just the
@@ -163,6 +196,21 @@ async function classifyIntent(message) {
   let wantsFAQ = matchesAny(lowerMsg, FAQ_KEYWORDS);
   let wantsProducts = matchesAny(lowerMsg, PRODUCT_KEYWORDS);
   let wantsCompanyInfo = matchesAny(lowerMsg, COMPANY_KEYWORDS);
+  const wantsClaims = matchesAny(lowerMsg, CLAIMS_KEYWORDS);
+
+  // Claims override — a claims table match takes priority over FAQ/company
+  // knowledge so the AI grounds its answer in the authoritative claims
+  // data instead of general support content that merely mentions "claim".
+  if (wantsClaims) {
+    if (wantsFAQ) {
+      console.log('[IntentRouter] claims intent detected — suppressing faq intent for this message');
+    }
+    if (wantsCompanyInfo) {
+      console.log('[IntentRouter] claims intent detected — suppressing company intent for this message');
+    }
+    wantsFAQ = false;
+    wantsCompanyInfo = false;
+  }
 
   const branchKeywordHit = matchesAny(lowerMsg, BRANCH_KEYWORDS);
 
@@ -175,14 +223,16 @@ async function classifyIntent(message) {
   const cityHint = wantsBranches ? (matchedLocation || (cityMatch ? cityMatch[1] : null)) : null;
 
   const noIntentMatched =
-    !wantsFAQ && !wantsProducts && !wantsBranches && !wantsCompanyInfo;
+    !wantsFAQ && !wantsProducts && !wantsBranches && !wantsCompanyInfo && !wantsClaims;
 
   if (noIntentMatched) {
     wantsFAQ = true;
     wantsCompanyInfo = true;
   }
 
-  return { keywords, wantsFAQ, wantsProducts, wantsBranches, wantsCompanyInfo, cityHint };
+  console.log(`[IntentRouter] "${(message || '').substring(0, 60)}" -> faq:${wantsFAQ} products:${wantsProducts} branches:${wantsBranches} company:${wantsCompanyInfo} claims:${wantsClaims}`);
+
+  return { keywords, wantsFAQ, wantsProducts, wantsBranches, wantsCompanyInfo, wantsClaims, cityHint };
 }
 
 module.exports = { classifyIntent };

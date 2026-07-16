@@ -174,6 +174,73 @@ async function searchInsuranceProducts(searchQuery, limit = 5) {
 }
 
 // ---------------------------------------------------------------------------
+// searchClaims
+// ---------------------------------------------------------------------------
+async function searchClaims(searchQuery, limit = 5) {
+  try {
+    const keywords = extractKeywords(searchQuery);
+
+    let result;
+    let sql;
+    let isFallback = false;
+
+    if (keywords.length === 0) {
+      // No meaningful keywords → return top active rows
+      isFallback = true;
+      sql = `
+        SELECT id, name, category, subcategory, description, keywords,
+               COALESCE(source_url, NULL) AS source_url
+        FROM claims
+        WHERE is_active = true
+        ORDER BY category, subcategory
+        LIMIT $1
+      `;
+      result = await query(sql, [limit]);
+    } else {
+      const { conditions, params, nextIndex } = buildIlikeConditions(
+        keywords,
+        ['name', 'category', 'subcategory', 'description'],
+        1
+      );
+      sql = `
+        SELECT id, name, category, subcategory, description, keywords,
+               COALESCE(source_url, NULL) AS source_url
+        FROM claims
+        WHERE is_active = true
+          AND (
+            ${conditions}
+            OR keywords && $${nextIndex}::text[]
+          )
+        ORDER BY category, subcategory
+        LIMIT $${nextIndex + 1}
+      `;
+      result = await query(sql, [...params, toPgArray(keywords), limit]);
+
+      // Fallback: if keyword search returns nothing, fetch top rows so the
+      // AI still has claims context rather than none at all
+      if (result.rowCount === 0) {
+        isFallback = true;
+        sql = `
+          SELECT id, name, category, subcategory, description, keywords,
+                 COALESCE(source_url, NULL) AS source_url
+          FROM claims
+          WHERE is_active = true
+          ORDER BY category, subcategory
+          LIMIT $1
+        `;
+        result = await query(sql, [limit]);
+      }
+    }
+
+    logSearchDebug('claims', keywords, result.rowCount, sql, isFallback);
+    return result.rows;
+  } catch (err) {
+    console.error('[RAG ERROR] Claims search failed:', err.message);
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
 // getProducts — unchanged logic, kept for backwards compatibility
 // ---------------------------------------------------------------------------
 async function getProducts(category = null, subsidiary = null) {
@@ -438,5 +505,6 @@ module.exports = {
   getRecommendation,
   searchCompanyKnowledge,
   searchInsuranceProducts,
+  searchClaims,
   getQuickFact,
 };

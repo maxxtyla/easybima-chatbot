@@ -98,7 +98,7 @@ export function MessageList({ messages, isLoading, onReply }: MessageListProps) 
           <div className="flex items-center justify-center h-full text-center">
             <div className="text-neutral-500">
               <h3 className="font-semibold mb-2">Welcome to CIC Insurance</h3>
-              <p className="text-sm">I&apos;m Bima CIC AI assistant. I am ready to help you!</p>
+              <p className="text-sm"> I am ready to help you!</p>
             </div>
           </div>
         ) : (

@@ -1018,26 +1018,6 @@ Visit `http://localhost:3000` for the public site + chat widget, and
 
 ---
 
-## 10. Testing
-
-- `tests/unit/policyService.test.js` — Jest unit tests for
-  `policyService.js`, with `pg` mocked out entirely (`jest.mock` on
-  `config/database`). Covers `searchFAQ` (match found / short-query /
-  DB-error paths) and `getProducts`. **Note:** some of these tests target
-  an older shape of `policyService.js` (e.g. `getProducts` querying a
-  `products` table and a "short queries return empty" behavior) that no
-  longer matches the current implementation's fallback-to-top-rows design
-  — treat this file as a starting point to update rather than as
-  currently-passing coverage.
-- `tests/integration/chat.test.js` — Supertest-driven integration tests
-  against the real Express `app` export from `backend/server.js`, with
-  `@anthropic-ai/sdk` and the database pool mocked. Exercises
-  `POST /api/chat` for new-session creation and session continuity across
-  requests. Similarly, some assertions (e.g. an unconditional `suggestions`
-  field) reflect an earlier response shape and should be revisited against
-  the current `handleChat` implementation before relying on them as
-  regression coverage.
-
 Run with:
 ```bash
 cd backend && npm test          # jest --coverage

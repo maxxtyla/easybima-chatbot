@@ -69,6 +69,16 @@ function buildContextMessage(contextData = {}) {
     });
   }
 
+  if (contextData.claimsInfo?.length) {
+    parts.push('\n## Claims');
+    contextData.claimsInfo.forEach((c, idx) => {
+      const src = c.source_url ? ` (source: ${c.source_url})` : '';
+      const name = c.subcategory ? `${c.category} — ${c.subcategory}` : c.category;
+      parts.push(`${idx + 1}. **${c.name}** (${name})`);
+      if (c.description) parts.push(`   ${c.description}${src}`);
+    });
+  }
+
   if (parts.length <= 1) return null;
 
   return {

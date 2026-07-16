@@ -32,6 +32,7 @@ const {
   findBranches,
   searchCompanyKnowledge,
   searchInsuranceProducts,
+  searchClaims,
 } = require('./policyService');
 const { rankResults } = require('../utils/rankResults');
 const { classifyIntent } = require('../utils/intentRouter');
@@ -234,6 +235,7 @@ console.log(`🚨 [Escalation check] "${message}" → needsEscalation=${needsEsc
   console.log(`   product intent: ${intent.wantsProducts}`);
   console.log(`   branch intent : ${intent.wantsBranches}`);
   console.log(`   company intent: ${intent.wantsCompanyInfo}`);
+  console.log(`   claims intent : ${intent.wantsClaims}`);
 
   // Build only the queries we actually need, run them in parallel, then
   // map results back by label (avoids fragile positional destructuring
@@ -250,6 +252,9 @@ console.log(`🚨 [Escalation check] "${message}" → needsEscalation=${needsEsc
     jobs.push(['products', searchInsuranceProducts(message, 6)]);
     jobs.push(['recommendation', getRecommendation(message)]);
   }
+  if (intent.wantsClaims) {
+    jobs.push(['claims', searchClaims(message, 5)]);
+  }
 
   const settled = await Promise.all(jobs.map(([, promise]) => promise));
   const resultsByLabel = Object.fromEntries(jobs.map(([label], i) => [label, settled[i]]));
@@ -258,6 +263,7 @@ console.log(`🚨 [Escalation check] "${message}" → needsEscalation=${needsEsc
   const companyInfoMatches = resultsByLabel.company || [];
   const directProducts = resultsByLabel.products || [];
   const recommendation = resultsByLabel.recommendation || { matchedProducts: [] };
+  const claimsMatches = resultsByLabel.claims || [];
 
   let branches = [];
   if (intent.wantsBranches) {
@@ -269,6 +275,7 @@ console.log(`🚨 [Escalation check] "${message}" → needsEscalation=${needsEsc
   const rankedCompany = rankResults(companyInfoMatches, message).slice(0, 3);
   const rankedProducts = rankResults(directProducts, message).slice(0, 5);
   const rankedBranches = rankResults(branches, message).slice(0, 5);
+  const rankedClaims = rankResults(claimsMatches, message).slice(0, 5);
 
   const contextData = {};
 
@@ -303,12 +310,20 @@ console.log(`🚨 [Escalation check] "${message}" → needsEscalation=${needsEsc
     }));
   }
 
+  if (rankedClaims.length > 0) {
+    contextData.claimsInfo = rankedClaims.map(c => ({
+      id: c.id, name: c.name, category: c.category, subcategory: c.subcategory,
+      description: c.description, keywords: c.keywords, source_url: c.source_url,
+    }));
+  }
+
   const hasContext =
     (contextData.faqContext?.length > 0) ||
     (contextData.companyInfo?.length > 0) ||
     (contextData.products?.length > 0) ||
     (contextData.recommendations?.matchedProducts?.length > 0) ||
-    (contextData.branches?.length > 0);
+    (contextData.branches?.length > 0) ||
+    (contextData.claimsInfo?.length > 0);
 
   if (!hasContext) {
     contextData._noResults = true;
@@ -319,6 +334,7 @@ console.log(`🚨 [Escalation check] "${message}" → needsEscalation=${needsEsc
       contextData.companyInfo?.length && `knowledge:${contextData.companyInfo.length}`,
       contextData.products?.length && `products:${contextData.products.length}`,
       contextData.branches?.length && `branches:${contextData.branches.length}`,
+      contextData.claimsInfo?.length && `claims:${contextData.claimsInfo.length}`,
     ].filter(Boolean);
     console.log(`✅ [RAG] Context assembled — ${counts.join(', ')}`);
   }
