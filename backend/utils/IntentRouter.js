@@ -28,7 +28,7 @@ const BRANCH_KEYWORDS = [
 ];
 
 const PRODUCT_KEYWORDS = [
-  'product', 'products', 'cover', 'coverage', 'insure', 'insurance', 'policy',
+  'product', 'products', 'cover', 'coverage', 'insure', 'insurance', 'policy','haba','haba na haba',
   'plan', 'benefit', 'benefits', 'offer', 'motor', 'car insurance', 'health',
   'medisure','family','health','medical','inpatient','outpatient','hospital','diagnostics','chemotherapy','surgery','dependants',
   'group','personal accident','funeral','death','children','adults','group cover', 'benefit',
@@ -56,7 +56,9 @@ const PRODUCT_KEYWORDS = [
   'student','personal accident','bodily injury','work insurance','accidental','violent','industry attachment insurance',
   'saving', 'savings', 'save', 'savings plan', 'savings account', 'savings product',
   'education savings', 'child savings', 'goal savings', 'savings and investment',
-  'endowment', 'endowment policy', 'retirement savings', 'save money', 'saving plan',
+  'endowment', 'endowment policy', 'retirement savings', 'save money', 'saving plan','mobile savings','life cover','cover','akiba','akiba smart','jilinde',
+  'investment protection','protection','academia','academia policy' ,'invest plan','smart saver','bulgary','theft','thieves','stolen','stole',
+  'funeral expense','medisure','grouplife','group life','loan guard','afya bora','seniors','SME','sme','medipack'
 ];
 
 const COMPANY_KEYWORDS = [

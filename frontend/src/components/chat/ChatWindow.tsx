@@ -7,6 +7,7 @@ import { MessageList } from './MessageList'
 import { InputBar } from './InputBar'
 import { QuickQuestions } from './QuickQuestions'
 import { ConfirmEndChatModal } from './ConfirmEndChatModal'
+import { ContactInfoModal } from './ContactInfoModal'
 import { HomeTab } from './HomeTab'
 import { TabBar, WidgetTab } from './TabBar'
 import { useChat } from '@/hooks/useChat'
@@ -15,15 +16,15 @@ import { Message, QuickQuestion, ReplySnippet } from '@/types/chat'
 const QUICK_QUESTIONS: QuickQuestion[] = [
   {
     id: '1',
-    text: 'Get an insurance quote',
+    text: 'Speak to customer care agent',
   },
   {
     id: '2',
-    text: 'Buy an insurance Cover',
+    text: 'Haba na Haba CIC',
   },
   {
     id: '3',
-    text: 'Tell me about  CIC insurance Group.',
+    text: 'About  CIC insurance Group.',
   },
  
 ]
@@ -51,7 +52,22 @@ export function ChatWindow({
   onConfirmClose,
   onCancelClose,
 }: ChatWindowProps) {
-  const { messages, isLoading, handleSendMessage, ticketNumber, assignedAgent, ticketStatus, ticketCreatedAt, closeTicket, isClosingTicket } = chat
+  const {
+    messages,
+    isLoading,
+    handleSendMessage,
+    ticketNumber,
+    assignedAgent,
+    ticketStatus,
+    ticketCreatedAt,
+    closeTicket,
+    isClosingTicket,
+    awaitingContactInfo,
+    submitContactInfo,
+    skipContactInfo,
+    isSubmittingContact,
+    contactError,
+  } = chat
   const showQuickQuestions = messages.length === 0
 
   const hasActiveConversation = messages.length > 0 || !!ticketNumber
@@ -124,6 +140,16 @@ export function ChatWindow({
           isEnding={isEndingSession}
           ticketNumber={ticketNumber}
           hasOpenTicket={!!ticketNumber && !['resolved', 'closed'].includes(ticketStatus || 'open')}
+        />
+      )}
+
+      {!showCloseConfirm && awaitingContactInfo && (
+        <ContactInfoModal
+          ticketNumber={ticketNumber}
+          onSubmit={submitContactInfo}
+          onSkip={skipContactInfo}
+          isSubmitting={isSubmittingContact}
+          errorMessage={contactError}
         />
       )}
     </div>

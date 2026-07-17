@@ -86,3 +86,37 @@ export async function closeTicket(sessionId: string): Promise<{ success: boolean
   }
   return response.json();
 }
+
+export interface SubmitContactInfoResponse {
+  success: boolean;
+  ticketNumber: string;
+  customerName: string | null;
+  customerEmail: string | null;
+  customerPhone: string | null;
+}
+
+/**
+ * Sends whatever contact details the customer entered in the "How can we
+ * reach you?" prompt to the backend, which attaches them to the session's
+ * currently open ticket. At least one of email/phone must be set (enforced
+ * server-side too).
+ */
+export async function submitContactInfo(
+  sessionId: string,
+  contact: { name?: string; email?: string; phone?: string }
+): Promise<SubmitContactInfoResponse> {
+  const response = await fetch(`${API_BASE}/chat/contact-info`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId, ...contact }),
+  });
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    const error = new Error(body.message || 'Failed to submit contact info') as any;
+    error.status = response.status;
+    error.code = body.error;
+    throw error;
+  }
+  return response.json();
+}

@@ -1,12 +1,26 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Message, ChatState, ReplySnippet, AssignedAgent } from '@/types/chat';
+import { Message, ChatState, ReplySnippet, AssignedAgent, ContactInfo } from '@/types/chat';
 import { generateId } from '@/lib/utils';
-import { sendMessage, keepAliveSession, endSession, getConversationHistory, getTicketStatus, closeTicket as closeTicketApi } from '@/lib/api';
+import { sendMessage, keepAliveSession, endSession, getConversationHistory, getTicketStatus, closeTicket as closeTicketApi, submitContactInfo as submitContactInfoApi } from '@/lib/api';
 import { playNotificationSound } from '@/lib/notificationSound';
 
 const STORAGE_KEY = 'cic-chat-session';
+
+// Per-session flag so the "how can we reach you?" prompt only ever appears
+// once per escalation — once the customer has submitted or explicitly
+// skipped it, a page refresh (or a later message in the same session)
+// won't ask again.
+const CONTACT_STORAGE_PREFIX = 'cic-chat-contact-status:';
+function getContactStatus(sessionId: string): 'submitted' | 'skipped' | null {
+  if (typeof window === 'undefined' || !sessionId) return null;
+  return localStorage.getItem(`${CONTACT_STORAGE_PREFIX}${sessionId}`) as 'submitted' | 'skipped' | null;
+}
+function setContactStatus(sessionId: string, status: 'submitted' | 'skipped') {
+  if (typeof window === 'undefined' || !sessionId) return;
+  localStorage.setItem(`${CONTACT_STORAGE_PREFIX}${sessionId}`, status);
+}
 
 // How long to wait after the last message before nudging toward a close.
 // The backend session times out after 5 min of inactivity, but our own
@@ -28,7 +42,11 @@ export function useChat() {
     ticketStatus: 'open',
     ticketCreatedAt: undefined,
     assignedAgent: null,
+    awaitingContactInfo: false,
   });
+
+  const [isSubmittingContact, setIsSubmittingContact] = useState(false);
+  const [contactError, setContactError] = useState<string | null>(null);
 
   const wrapUpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -247,7 +265,7 @@ export function useChat() {
       const wasTerminal = TERMINAL_TICKET_STATUSES.includes(lastKnownTicketStatusRef.current || '');
       const isTerminal = TERMINAL_TICKET_STATUSES.includes(ticket.ticketStatus || '');
       if (isTerminal && !wasTerminal && lastKnownTicketStatusRef.current !== null) {
-        addMessage('system', ` Your ticket ${ticket.ticketNumber ? `#${ticket.ticketNumber} ` : ''}has been marked as ${ticket.ticketStatus}. Thank you for chatting with us!`);
+        addMessage('system', ` Your ticket ${ticket.ticketNumber ? `#${ticket.ticketNumber} ` : ''}has been  ${ticket.ticketStatus}. Thank you for chatting with us!`);
         setIsEscalated(false);
         announcedAgentIdRef.current = null;
         waitingAnnouncedRef.current = false;
@@ -381,6 +399,15 @@ export function useChat() {
           clearWrapUpTimer();
           setIsEscalated(true);
           // Don't schedule wrap-up prompt when escalating — let the human handle it
+
+          // Ask for a way to reach the customer directly, once per
+          // escalated session. Skipped if they've already submitted or
+          // explicitly dismissed this prompt (e.g. on an earlier message
+          // in the same session, or before a page refresh).
+          const escalatedSessionId = response.sessionId || state.sessionId;
+          if (!getContactStatus(escalatedSessionId)) {
+            setState((prev) => ({ ...prev, awaitingContactInfo: true }));
+          }
         } else {
           addMessage('assistant', response.response);
           scheduleWrapUpPrompt();
@@ -493,6 +520,38 @@ export function useChat() {
     setState((prev) => ({ ...prev, isOpen: !prev.isOpen }));
   }, []);
 
+  // Submits the customer's email/phone from the live-support contact
+  // prompt, attaching it to their current ticket so the agent handling it
+  // can see (and reach) them directly.
+  const submitContactInfo = useCallback(
+    async (contact: ContactInfo) => {
+      if (!state.sessionId) return;
+      setIsSubmittingContact(true);
+      setContactError(null);
+      try {
+        await submitContactInfoApi(state.sessionId, contact);
+        setContactStatus(state.sessionId, 'submitted');
+        setState((prev) => ({ ...prev, awaitingContactInfo: false }));
+        addMessage('system', "Thanks — we've saved your details so an agent can reach you directly.");
+      } catch (error: any) {
+        console.error('Failed to submit contact info:', error);
+        setContactError(error?.message || "Sorry, we couldn't save that. Please try again.");
+      } finally {
+        setIsSubmittingContact(false);
+      }
+    },
+    [state.sessionId, addMessage]
+  );
+
+  // Customer dismisses the prompt without giving contact details — the
+  // ticket still goes through, they just remain reachable only inside the
+  // chat itself.
+  const skipContactInfo = useCallback(() => {
+    if (state.sessionId) setContactStatus(state.sessionId, 'skipped');
+    setContactError(null);
+    setState((prev) => ({ ...prev, awaitingContactInfo: false }));
+  }, [state.sessionId]);
+
   return {
     ...state,
     addMessage,
@@ -502,5 +561,9 @@ export function useChat() {
     closeTicket,
     isClosingTicket,
     toggleChat,
+    submitContactInfo,
+    skipContactInfo,
+    isSubmittingContact,
+    contactError,
   };
 }

@@ -511,7 +511,9 @@ export default function TicketDetailPage() {
             </div>
 
             <dl className="text-sm text-neutral-600 space-y-1 pt-2 border-t border-neutral-100">
-              <div className="flex justify-between"><dt className="text-neutral-400">Customer</dt><dd>{ticket.customer_name || ticket.customer_phone || '—'}</dd></div>
+              <div className="flex justify-between"><dt className="text-neutral-400">Customer</dt><dd>{ticket.customer_name || '—'}</dd></div>
+              <div className="flex justify-between"><dt className="text-neutral-400">Email</dt><dd>{ticket.customer_email || '—'}</dd></div>
+              <div className="flex justify-between"><dt className="text-neutral-400">Phone</dt><dd>{ticket.customer_phone || '—'}</dd></div>
               <div className="flex justify-between"><dt className="text-neutral-400">Channel</dt><dd>{ticket.channel}</dd></div>
               <div className="flex justify-between"><dt className="text-neutral-400">Category</dt><dd>{ticket.category || '—'}</dd></div>
               <div className="flex justify-between"><dt className="text-neutral-400">Source</dt><dd>{ticket.source}</dd></div>

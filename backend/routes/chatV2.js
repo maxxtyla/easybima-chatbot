@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { handleChat, getConversationHistory, keepAliveSession, endSession, getTicketStatus, closeTicket } = require('../controllers/chatControllerV2');
+const { handleChat, getConversationHistory, keepAliveSession, endSession, getTicketStatus, closeTicket, submitContactInfo } = require('../controllers/chatControllerV2');
 const { validateInput } = require('../middleware/validateInput');
 
 /**
@@ -93,6 +93,25 @@ router.get('/ticket/:sessionId', getTicketStatus);
  * Customer closes their own open ticket from the widget's ticket card.
  */
 router.post('/ticket/close', closeTicket);
+
+/**
+ * POST /api/chat/contact-info
+ * Body: { sessionId, name?, email?, phone? }
+ *
+ * Attaches customer contact details to the session's current open ticket.
+ * Called from the widget's "How can we reach you?" prompt shown right
+ * after a live-support escalation. At least one of email/phone is required.
+ *
+ * Response:
+ * {
+ *   success: boolean,
+ *   ticketNumber: string,
+ *   customerName: string | null,
+ *   customerEmail: string | null,
+ *   customerPhone: string | null
+ * }
+ */
+router.post('/contact-info', submitContactInfo);
 
 /**
  * GET /api/chat/health

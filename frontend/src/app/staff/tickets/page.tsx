@@ -243,8 +243,12 @@ export default function TicketQueuePage() {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-neutral-700 whitespace-nowrap">
-                        {ticket.customer_name || ticket.customer_phone || '—'}
-                        <span className="block text-xs text-neutral-400">{ticket.channel}</span>
+                        {ticket.customer_name || ticket.customer_phone || ticket.customer_email || '—'}
+                        <span className="block text-xs text-neutral-400">
+                          {ticket.channel}
+                          {(ticket.customer_email || ticket.customer_phone) && ' · '}
+                          {ticket.customer_email || ticket.customer_phone || ''}
+                        </span>
                       </td>
                       <td className="px-4 py-3 text-neutral-600 max-w-xs truncate">{ticket.subject}</td>
                       <td className="px-4 py-3">

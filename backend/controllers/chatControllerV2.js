@@ -12,7 +12,8 @@ const {
   buildSessionExpiredResponse,
   buildErrorResponse,
 } = require('../utils/responseBuilder');
-const { getLatestTicketWithAgent, closeTicketByCustomer } = require('../services/ticketService');
+const { getLatestTicketWithAgent, closeTicketByCustomer, submitCustomerContactInfo } = require('../services/ticketService');
+const validator = require('validator');
 
 /**
  * POST /api/chat
@@ -310,4 +311,80 @@ async function closeTicket(req, res) {
   }
 }
 
-module.exports = { handleChat, getConversationHistory, keepAliveSession, endSession, getTicketStatus, closeTicket };
+/**
+ * POST /api/chat/contact-info  Body: { sessionId, name?, email?, phone? }
+ *
+ * Called from the widget's "How can we reach you?" prompt, shown right
+ * after a live-support escalation creates a ticket. Attaches whatever
+ * contact details the customer gives to their current open ticket, so the
+ * agent picking it up can see (and reach) the person they're helping
+ * instead of just an anonymous session id. At least one of email/phone is
+ * required; both are accepted so the customer only has to fill in what
+ * they're comfortable sharing.
+ */
+async function submitContactInfo(req, res) {
+  const { sessionId, name, email, phone } = req.body;
+
+  try {
+    if (!sessionId) {
+      return res.status(400).json({ error: 'missing_session_id', message: 'sessionId is required' });
+    }
+
+    const trimmedEmail = typeof email === 'string' ? email.trim() : '';
+    const trimmedPhone = typeof phone === 'string' ? phone.trim() : '';
+    const trimmedName = typeof name === 'string' ? name.trim() : '';
+
+    if (!trimmedEmail && !trimmedPhone) {
+      return res.status(400).json({
+        error: 'contact_info_required',
+        message: 'Please provide at least an email address or a phone number.',
+      });
+    }
+
+    if (trimmedEmail && !validator.isEmail(trimmedEmail)) {
+      return res.status(400).json({ error: 'invalid_email', message: 'That email address doesn\'t look right.' });
+    }
+
+    // Loose check — customers type numbers in every format under the sun
+    // (spaces, dashes, +254...). We just want to catch obvious junk, not
+    // enforce a specific national format.
+    if (trimmedPhone && !/^\+?[0-9\s\-()]{7,20}$/.test(trimmedPhone)) {
+      return res.status(400).json({ error: 'invalid_phone', message: 'That phone number doesn\'t look right.' });
+    }
+
+    const ticket = await submitCustomerContactInfo({
+      sessionId,
+      customerName: trimmedName || null,
+      customerEmail: trimmedEmail || null,
+      customerPhone: trimmedPhone || null,
+    });
+
+    if (!ticket) {
+      return res.status(404).json({
+        error: 'not_found',
+        message: 'No open support ticket found for this session.',
+      });
+    }
+
+    await logAnalytics(sessionId, 'contact_info_submitted', {
+      ticketId: ticket.id,
+      ticketNumber: ticket.ticket_number,
+      hasEmail: !!trimmedEmail,
+      hasPhone: !!trimmedPhone,
+      timestamp: new Date().toISOString(),
+    }).catch(() => {});
+
+    return res.json({
+      success: true,
+      ticketNumber: ticket.ticket_number,
+      customerName: ticket.customer_name,
+      customerEmail: ticket.customer_email,
+      customerPhone: ticket.customer_phone,
+    });
+  } catch (error) {
+    console.error('Error submitting contact info:', error);
+    return res.status(500).json(buildErrorResponse(error, sessionId));
+  }
+}
+
+module.exports = { handleChat, getConversationHistory, keepAliveSession, endSession, getTicketStatus, closeTicket, submitContactInfo };

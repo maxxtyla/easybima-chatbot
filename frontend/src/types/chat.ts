@@ -50,6 +50,19 @@ export interface ChatState {
   ticketStatus?: TicketStatus
   ticketCreatedAt?: string
   assignedAgent?: AssignedAgent | null
+  /** True once a ticket exists for this session and we haven't yet asked
+   *  (or the customer hasn't yet answered) the "how can we reach you?"
+   *  contact prompt for it. Drives whether ContactInfoModal is shown. */
+  awaitingContactInfo?: boolean
+}
+
+/** Contact details the customer enters in the live-support prompt. Email
+ *  and phone are both optional individually, but at least one is required
+ *  to submit (enforced in the modal and again server-side). */
+export interface ContactInfo {
+  name?: string
+  email?: string
+  phone?: string
 }
 
 export interface QuickQuestion {

@@ -717,6 +717,72 @@ async function closeTicketByCustomer(sessionId) {
 }
 
 /**
+ * Attaches (or fills in) the customer's contact details on their current
+ * ticket — called when the widget prompts a customer for email/phone right
+ * after requesting live support, so the agent picking up the ticket knows
+ * who they're talking to and has a way to reach them outside the chat.
+ *
+ * Scoped by sessionId (same pattern as closeTicketByCustomer) rather than a
+ * bare ticketId, and only ever fills in a field if one wasn't already set
+ * (COALESCE + NULLIF) — so this can't be used to overwrite contact details
+ * an agent has since corrected on the ticket, and re-submitting the widget
+ * form (e.g. after a page refresh) is always safe/idempotent. Returns null
+ * if there's no open ticket for this session to attach the info to.
+ */
+async function submitCustomerContactInfo({ sessionId, customerName, customerPhone, customerEmail }) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const ticketResult = await client.query(
+      `SELECT * FROM tickets
+       WHERE session_id = $1 AND status NOT IN ('resolved', 'closed')
+       ORDER BY created_at DESC
+       LIMIT 1
+       FOR UPDATE`,
+      [sessionId]
+    );
+    const ticket = ticketResult.rows[0];
+    if (!ticket) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+
+    const result = await client.query(
+      `UPDATE tickets SET
+         customer_name = COALESCE(customer_name, NULLIF($2, '')),
+         customer_phone = COALESCE(customer_phone, NULLIF($3, '')),
+         customer_email = COALESCE(customer_email, NULLIF($4, '')),
+         updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [ticket.id, customerName || null, customerPhone || null, customerEmail || null]
+    );
+
+    await logTicketEvent(client, {
+      ticketId: ticket.id,
+      actorType: 'customer',
+      eventType: 'contact_info_provided',
+      eventData: {
+        customer_name: customerName || null,
+        customer_phone: customerPhone || null,
+        customer_email: customerEmail || null,
+      },
+    });
+
+    await client.query('COMMIT');
+    console.log(`📇 [TICKET CONTACT] ticketId=${ticket.id} ticket=${result.rows[0].ticket_number} sessionId=${sessionId} contact info recorded`);
+
+    return result.rows[0];
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
  * Ticket counts for the signed-in agent's profile page. "Open" here means
  * actively in their queue (open/assigned/in_progress) as distinct from
  * pending_customer, so the three buckets don't overlap.
@@ -757,5 +823,6 @@ module.exports = {
   getLatestTicketWithAgent,
   sendAgentMessage,
   closeTicketByCustomer,
+  submitCustomerContactInfo,
   getAgentStats,
 };
