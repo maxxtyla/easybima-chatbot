@@ -16,6 +16,14 @@ const config: Config = {
         'cic-gray': '#111111',
         'cic-light': '#F9FAFB',
         'cic-white': '#FFFFFF',
+        // Accent palette — used sparingly on product/advert surfaces to
+        // give the card carousel visual rhythm without diluting the red
+        // brand identity elsewhere in the widget.
+        'cic-gold': '#E3A63E',
+        'cic-gold-dark': '#B9822A',
+        'cic-teal': '#0E6E62',
+        'cic-teal-dark': '#0A5049',
+        'cic-plum': '#5C1A2E',
         // Neutral palette
         'neutral': {
           '50': '#F9FAFB',
@@ -43,6 +51,11 @@ const config: Config = {
         'pulse-dot': 'pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite',
         'fade-in': 'fadeIn 0.3s ease-in',
         'slide-up': 'slideUp 0.3s ease-out',
+        'float-slow': 'floatSlow 7s ease-in-out infinite',
+        'float-slower': 'floatSlow 10s ease-in-out infinite',
+        'ping-slow': 'pingSlow 2.4s cubic-bezier(0, 0, 0.2, 1) infinite',
+        'fade-in-up': 'fadeInUp 0.45s cubic-bezier(0.16, 1, 0.3, 1) both',
+        'shimmer': 'shimmer 2.6s linear infinite',
       },
       keyframes: {
         fadeIn: {
@@ -52,6 +65,22 @@ const config: Config = {
         slideUp: {
           '0%': { transform: 'translateY(10px)', opacity: '0' },
           '100%': { transform: 'translateY(0)', opacity: '1' },
+        },
+        floatSlow: {
+          '0%, 100%': { transform: 'translate(0, 0) scale(1)' },
+          '50%': { transform: 'translate(4px, -10px) scale(1.05)' },
+        },
+        pingSlow: {
+          '0%': { transform: 'scale(0.9)', opacity: '0.7' },
+          '70%, 100%': { transform: 'scale(1.9)', opacity: '0' },
+        },
+        fadeInUp: {
+          '0%': { opacity: '0', transform: 'translateY(8px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+        shimmer: {
+          '0%': { backgroundPosition: '-200% 0' },
+          '100%': { backgroundPosition: '200% 0' },
         },
       },
       spacing: {

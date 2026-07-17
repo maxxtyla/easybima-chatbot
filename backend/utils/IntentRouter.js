@@ -62,7 +62,7 @@ const PRODUCT_KEYWORDS = [
 ];
 
 const COMPANY_KEYWORDS = [
-  'about', 'history', 'company', 'cic', 'group', 'mission', 'vision',
+  'about', 'history', 'company', 'group', 'mission', 'vision',
   'founded', 'when was', 'leadership', 'ceo', 'chairman', 'subsidiary', 'company', 'history', 'overview',
   'subsidiaries', 'sustainability', 'careers', 'annual report', 'who are you',
   'X','twitter','social media','socialmedia','online platforms','linked in',

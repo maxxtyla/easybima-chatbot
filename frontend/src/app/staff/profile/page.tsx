@@ -69,7 +69,7 @@ export default function AgentProfilePage() {
               </div>
             )}
 
-            <h2 className="text-sm font-medium text-cic-gray mb-3">Tickets you've handled</h2>
+            <h2 className="text-sm font-medium text-cic-gray mb-3">Tickets you&apos;ve handled</h2>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               {stats && STAT_CARDS.map((card) => (
                 <div key={card.key} className="bg-cic-white rounded-xl border border-neutral-200 p-4">

@@ -5,6 +5,7 @@ import { Message } from '@/types/chat'
 import { MessageBubble } from './MessageBubble'
 import { TypingIndicator } from './TypingIndicator'
 import { ChevronDownIcon } from './UiIcons'
+import { ProductAdCarousel } from './ProductAdCarousel'
 
 interface MessageListProps {
   messages: Message[]
@@ -95,10 +96,27 @@ export function MessageList({ messages, isLoading, onReply }: MessageListProps) 
         className="h-full overflow-y-auto bg-cic-light p-4 space-y-4"
       >
         {messages.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-center">
-            <div className="text-neutral-500">
-              <h3 className="font-semibold mb-2">Welcome to CIC Insurance</h3>
-              <p className="text-sm"> I am ready to help you!</p>
+          <div className="flex flex-col items-center text-center pt-2 pb-1 animate-fade-in-up">
+            <div className="relative mb-3">
+              <span className="absolute inset-0 rounded-full bg-cic-red/15 animate-ping-slow" aria-hidden="true" />
+              <div className="relative w-16 h-16 rounded-full bg-white p-1.5 shadow-chat-bubble ring-1 ring-neutral-100">
+                <img src="/bima-avatar.svg" alt="Bima" className="w-full h-full" />
+              </div>
+              <span
+                className="absolute bottom-0.5 right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-400 ring-2 ring-white"
+                aria-hidden="true"
+              />
+            </div>
+            <h3 className="text-base font-bold text-cic-gray mb-1">Welcome to CIC Insurance</h3>
+            <p className="text-sm text-neutral-500 max-w-[260px] mb-5">
+              I&apos;m Bima, ready to help with quotes, claims, or any of our products.
+            </p>
+
+            <div className="w-full text-left">
+              <h4 className="text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-2 px-0.5">
+                While you&apos;re here, explore
+              </h4>
+              <ProductAdCarousel compact />
             </div>
           </div>
         ) : (

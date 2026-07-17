@@ -165,3 +165,50 @@ button:focus-visible {
   flex-shrink: 0;
   margin-top: 0.45rem;   /* aligns with cap-height of 14px Inter text */
 }
+
+/* ── Product advert carousel ── */
+/* Horizontal, swipeable, scroll-snapped row of product cards. Scrollbar is
+   hidden since the dot indicators below the carousel communicate position. */
+.ad-carousel-track {
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.ad-carousel-track::-webkit-scrollbar {
+  display: none;
+  height: 0;
+  width: 0;
+}
+
+.ad-carousel-card {
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+}
+
+/* Diagonal sheen sweep used on the hero + featured ad card to read as
+   "premium/protected" without relying on a stock photo. */
+.sheen {
+  background-image: linear-gradient(
+    115deg,
+    transparent 20%,
+    rgba(255, 255, 255, 0.16) 36%,
+    rgba(255, 255, 255, 0.28) 42%,
+    rgba(255, 255, 255, 0.16) 48%,
+    transparent 64%
+  );
+  background-size: 220% 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-float-slow,
+  .animate-float-slower,
+  .animate-ping-slow,
+  .animate-shimmer,
+  .animate-fade-in-up {
+    animation: none !important;
+  }
+}

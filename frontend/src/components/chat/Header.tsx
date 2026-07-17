@@ -19,7 +19,7 @@ export function Header({ onClose, ticketNumber, assignedAgent }: HeaderProps) {
           <img src="/cic-logo.png" alt="CIC" className="w-8 h-8 object-contain" />
         </div>
         <div className="flex-1">
-          <h2 className="font-semibold text-base">Bima CIC'S AI Support</h2>
+          <h2 className="font-semibold text-base">Bima &mdash; CIC&apos;s AI Support</h2>
           <div className="flex items-center gap-2">
             <p className="text-xs text-red-100">
               {hasActiveTicket ? 'Connected to agent' : 'Online and ready to help'}
