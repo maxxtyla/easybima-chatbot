@@ -151,12 +151,112 @@ async function getKnownLocationTerms() {
   }
 }
 
-function matchesLocation(lowerMsg, locationTerms) {
-  for (const term of locationTerms) {
+// Generic "does this message contain any known term from this set" check —
+// shared by branch-location matching and product matching below, so both
+// stay grounded in real DB values instead of a static guess-list.
+function matchesKnownTerm(lowerMsg, termSet) {
+  for (const term of termSet) {
     // Skip 1-2 char terms (e.g. stray short tags) to avoid noisy false positives
     if (term.length > 2 && lowerMsg.includes(term)) return term;
   }
   return null;
+}
+
+// Back-compat alias — kept so any other caller of the old name still works.
+const matchesLocation = matchesKnownTerm;
+
+// ---------------------------------------------------------------------------
+// Known product terms — pulled from insurance_products.name (word-split) and
+// insurance_products.keywords, so that mentioning an actual product/service
+// by name ("cic pharmacy", "haba haba") triggers product retrieval even when
+// the static PRODUCT_KEYWORDS list has no idea that term exists. This is the
+// same pattern as getKnownLocationTerms() for branches — a hand-maintained
+// keyword list will always lag behind the real catalog; matching against
+// live DB values doesn't.
+//
+// A handful of generic words that show up in almost every product name
+// ("cic", "plan", "cover", "policy", "insurance") are excluded so they don't
+// blanket-match every message the way "branch" used to for branches.
+// ---------------------------------------------------------------------------
+const PRODUCT_TERM_NOISE = new Set([
+  'cic', 'plan', 'cover', 'policy', 'insurance', 'product', 'group',
+  'and', 'the', 'for', 'with', 'our', 'your',
+]);
+
+const FAQ_CACHE_TTL_MS = 5 * 60 * 1000;
+let faqTermCache = null; // Set<string>
+let faqTermCacheExpiry = 0;
+
+// Known FAQ terms — pulled ONLY from faq_entries.keywords (curated), not
+// question/answer text. Question text is long, natural-language prose;
+// splitting it into terms would just rebuild a noisy, uncontrolled version
+// of FAQ_KEYWORDS. keywords[] is deliberately curated per-row, so it's a
+// clean, high-signal source the same way insurance_products.keywords is.
+async function getKnownFAQTerms() {
+  const now = Date.now();
+  if (faqTermCache && now < faqTermCacheExpiry) {
+    return faqTermCache;
+  }
+
+  try {
+    const result = await query(
+      `SELECT keywords FROM faq_entries WHERE is_active = true`
+    );
+
+    const terms = new Set();
+    for (const row of result.rows) {
+      (row.keywords || []).forEach(kw => {
+        const clean = (kw || '').toLowerCase().trim();
+        if (clean && clean.length > 2 && !PRODUCT_TERM_NOISE.has(clean)) terms.add(clean);
+      });
+    }
+
+    faqTermCache = terms;
+    faqTermCacheExpiry = now + FAQ_CACHE_TTL_MS;
+    return terms;
+  } catch (err) {
+    console.error('[IntentRouter] Failed to load FAQ terms, falling back to static keywords only:', err.message);
+    return faqTermCache || new Set();
+  }
+}
+
+const PRODUCT_CACHE_TTL_MS = 5 * 60 * 1000;
+let productTermCache = null; // Set<string>
+let productTermCacheExpiry = 0;
+
+async function getKnownProductTerms() {
+  const now = Date.now();
+  if (productTermCache && now < productTermCacheExpiry) {
+    return productTermCache;
+  }
+
+  try {
+    const result = await query(
+      `SELECT name, keywords FROM insurance_products WHERE is_active = true`
+    );
+
+    const terms = new Set();
+    for (const row of result.rows) {
+      if (row.name) {
+        row.name
+          .toLowerCase()
+          .split(/\W+/)
+          .filter(w => w.length > 2 && !PRODUCT_TERM_NOISE.has(w))
+          .forEach(w => terms.add(w));
+      }
+      (row.keywords || []).forEach(kw => {
+        const clean = (kw || '').toLowerCase().trim();
+        if (clean && !PRODUCT_TERM_NOISE.has(clean)) terms.add(clean);
+      });
+    }
+
+    productTermCache = terms;
+    productTermCacheExpiry = now + PRODUCT_CACHE_TTL_MS;
+    return terms;
+  } catch (err) {
+    console.error('[IntentRouter] Failed to load product terms, falling back to static keywords only:', err.message);
+    return productTermCache || new Set();
+  }
 }
 
 /**
@@ -199,6 +299,36 @@ async function classifyIntent(message) {
   let wantsProducts = matchesAny(lowerMsg, PRODUCT_KEYWORDS);
   let wantsCompanyInfo = matchesAny(lowerMsg, COMPANY_KEYWORDS);
   const wantsClaims = matchesAny(lowerMsg, CLAIMS_KEYWORDS);
+
+  // Dynamic product match — catches real product names/keywords the static
+  // PRODUCT_KEYWORDS list doesn't know about yet (e.g. "cic pharmacy").
+  // This is deliberately evaluated even if wantsProducts is already true,
+  // so matchedProductTerm is available below for the company-info override.
+  const productTerms = await getKnownProductTerms();
+  const matchedProductTerm = matchesKnownTerm(lowerMsg, productTerms);
+  if (matchedProductTerm) {
+    wantsProducts = true;
+  }
+
+  // If the message names a specific known product, the products table is
+  // the authoritative source — don't let a generic word like "about" also
+  // pull in unrelated company_knowledge rows and dilute/contradict the
+  // product-specific answer. Same reasoning as the claims override below.
+  if (matchedProductTerm && wantsCompanyInfo) {
+    console.log(`[IntentRouter] matched known product term "${matchedProductTerm}" — suppressing company intent for this message`);
+    wantsCompanyInfo = false;
+  }
+
+  // Dynamic FAQ match — catches curated FAQ keywords the static FAQ_KEYWORDS
+  // list doesn't know about. Needed because the noIntentMatched fallback
+  // below only fires when NOTHING else matched — if the same message also
+  // matches products/company/etc, a specific FAQ tagged with this term
+  // would otherwise never get queried.
+  const faqTerms = await getKnownFAQTerms();
+  const matchedFAQTerm = matchesKnownTerm(lowerMsg, faqTerms);
+  if (matchedFAQTerm) {
+    wantsFAQ = true;
+  }
 
   // Claims override — a claims table match takes priority over FAQ/company
   // knowledge so the AI grounds its answer in the authoritative claims

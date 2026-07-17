@@ -3,7 +3,7 @@ import '@/styles/globals.css'
 import { ClientProviders } from './providers'
 
 export const metadata: Metadata = {
-  title: 'CIC Insurance | Easy Bima Chat Support',
+  title: 'CIC Insurance |  Bima AI Chat Support',
   description: 'Get instant support from CIC Insurance with our AI-powered chatbot. Fast, reliable, and always available.',
   viewport: 'width=device-width, initial-scale=1, viewport-fit=cover',
   icons: {

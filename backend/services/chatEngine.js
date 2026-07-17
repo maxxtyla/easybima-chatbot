@@ -28,7 +28,6 @@ const { buildEscalationResponse } = require('../utils/responseBuilder');
 const { createTicket, isSessionHandedOff, hasOpenTicket, getActiveTicketWithAgent } = require('./ticketService');
 const {
   searchFAQ,
-  getRecommendation,
   findBranches,
   searchCompanyKnowledge,
   searchInsuranceProducts,
@@ -250,7 +249,6 @@ console.log(`🚨 [Escalation check] "${message}" → needsEscalation=${needsEsc
   }
   if (intent.wantsProducts) {
     jobs.push(['products', searchInsuranceProducts(message, 6)]);
-    jobs.push(['recommendation', getRecommendation(message)]);
   }
   if (intent.wantsClaims) {
     jobs.push(['claims', searchClaims(message, 5)]);
@@ -262,8 +260,31 @@ console.log(`🚨 [Escalation check] "${message}" → needsEscalation=${needsEsc
   const faqMatches = resultsByLabel.faq || [];
   const companyInfoMatches = resultsByLabel.company || [];
   const directProducts = resultsByLabel.products || [];
-  const recommendation = resultsByLabel.recommendation || { matchedProducts: [] };
   const claimsMatches = resultsByLabel.claims || [];
+
+  // Built from the SAME rows searchInsuranceProducts already fetched above —
+  // this used to be a second, independent DB call via getRecommendation()
+  // that re-ran the identical search. rankResults() below may filter
+  // directProducts down to zero (all rows scored 0 against the message,
+  // e.g. a stage-3 "fallback-all" broad sample) — when that happens we
+  // still want the AI to have *something* to reason from, so this raw,
+  // unranked version is kept as a fallback rather than nothing at all.
+  const recommendation = directProducts.length > 0
+    ? {
+        category:        directProducts[0].category || 'General',
+        description:     directProducts[0].description || '',
+        matchedProducts: directProducts.map(m => ({
+          id:           m.id,
+          name:         m.name,
+          category:     m.category,
+          sub_category: m.sub_category,
+          description:  m.description,
+          benefits:     m.benefits,
+          source_url:   m.source_url || null,
+        })),
+        suggestion: 'Based on your interest, here are products that match your needs.',
+      }
+    : { category: 'General', matchedProducts: [], description: 'No direct product match found in the database.' };
 
   let branches = [];
   if (intent.wantsBranches) {
@@ -295,7 +316,7 @@ console.log(`🚨 [Escalation check] "${message}" → needsEscalation=${needsEsc
 
   if (rankedProducts.length > 0) {
     contextData.products = rankedProducts.map(p => ({
-      id: p.id, category: p.category, sub_category: p.sub_category,
+      id: p.id, name: p.name, category: p.category, sub_category: p.sub_category,
       description: p.description, benefits: p.benefits, source_url: p.source_url,
     }));
   } else if (recommendation.matchedProducts.length > 0) {

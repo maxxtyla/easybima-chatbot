@@ -44,20 +44,39 @@ function logSearchDebug(tableName, keywords, rowCount, sql, fallback = false) {
 // ---------------------------------------------------------------------------
 // searchFAQ
 // ---------------------------------------------------------------------------
+//
+// Staged search — same pattern as searchInsuranceProducts, for the same
+// reasons:
+//   Stage 1: keywords[] overlap only. faq_entries.keywords is backed by
+//            idx_faq_keywords (GIN), so this is a fast, indexed lookup —
+//            not a sequential scan — AND it's the curated, most-trusted
+//            signal (handles phrasing that never appears verbatim in the
+//            question/answer text). Ranked by (keyword_matches, priority)
+//            so a highly-relevant AND high-priority FAQ wins ties.
+//            Previously this was OR'd together with ILIKE in a single
+//            query, which prevents Postgres from using the GIN index
+//            efficiently — splitting them into stages lets Stage 1 actually
+//            benefit from the index you already have.
+//   Stage 2: ILIKE across question/answer, only if Stage 1 finds nothing.
+//            Ordered by priority DESC (no match-count signal at this stage).
+//   Stage 3: no match anywhere → top-priority active FAQs, so the AI still
+//            has some grounded FAQ context to work from.
+// ---------------------------------------------------------------------------
 async function searchFAQ(searchQuery, limit = 5) {
   try {
     const keywords = extractKeywords(searchQuery);
+    const FAQ_COLUMNS = `id, category, question, answer, keywords, priority,
+               COALESCE(source_url, NULL) AS source_url`;
 
     let result;
     let sql;
-    let isFallback = false;
+    let stage = 'none';
 
     if (keywords.length === 0) {
-      // No meaningful keywords → return top-priority active rows
-      isFallback = true;
+      // No usable keywords → top-priority active rows straight away
+      stage = 'fallback-all';
       sql = `
-        SELECT id, category, question, answer, keywords, priority,
-               COALESCE(source_url, NULL) AS source_url
+        SELECT ${FAQ_COLUMNS}
         FROM faq_entries
         WHERE is_active = true
         ORDER BY priority DESC
@@ -65,41 +84,58 @@ async function searchFAQ(searchQuery, limit = 5) {
       `;
       result = await query(sql, [limit]);
     } else {
-      const { conditions, params, nextIndex } = buildIlikeConditions(
-        keywords,
-        ['question', 'answer'],
-        1
-      );
+      // ── Stage 1: keywords[] overlap only (GIN-indexed) ────────────────
       sql = `
-        SELECT id, category, question, answer, keywords, priority,
-               COALESCE(source_url, NULL) AS source_url
+        SELECT ${FAQ_COLUMNS},
+               cardinality(
+                 ARRAY(SELECT unnest(keywords) INTERSECT SELECT unnest($1::text[]))
+               ) AS keyword_matches
         FROM faq_entries
         WHERE is_active = true
-          AND (
-            ${conditions}
-            OR keywords && $${nextIndex}::text[]
-          )
-        ORDER BY priority DESC
-        LIMIT $${nextIndex + 1}
+          AND keywords && $1::text[]
+        ORDER BY keyword_matches DESC, priority DESC
+        LIMIT $2
       `;
-      result = await query(sql, [...params, toPgArray(keywords), limit]);
+      result = await query(sql, [toPgArray(keywords), limit]);
 
-      // Fallback: if keyword search returns nothing, fetch top-priority rows
-      if (result.rowCount === 0) {
-        isFallback = true;
+      if (result.rowCount > 0) {
+        stage = 'keywords-match';
+      } else {
+        // ── Stage 2: ILIKE fallback across question/answer ──────────────
+        const { conditions, params, nextIndex } = buildIlikeConditions(
+          keywords,
+          ['question', 'answer'],
+          1
+        );
         sql = `
-          SELECT id, category, question, answer, keywords, priority,
-                 COALESCE(source_url, NULL) AS source_url
+          SELECT ${FAQ_COLUMNS}
           FROM faq_entries
           WHERE is_active = true
+            AND (${conditions})
           ORDER BY priority DESC
-          LIMIT $1
+          LIMIT $${nextIndex}
         `;
-        result = await query(sql, [limit]);
+        result = await query(sql, [...params, limit]);
+
+        if (result.rowCount > 0) {
+          stage = 'ilike-match';
+        } else {
+          // ── Stage 3: nothing matched anywhere → top-priority fallback ─
+          stage = 'fallback-all';
+          sql = `
+            SELECT ${FAQ_COLUMNS}
+            FROM faq_entries
+            WHERE is_active = true
+            ORDER BY priority DESC
+            LIMIT $1
+          `;
+          result = await query(sql, [limit]);
+        }
       }
     }
 
-    logSearchDebug('faq_entries', keywords, result.rowCount, sql, isFallback);
+    logSearchDebug('faq_entries', keywords, result.rowCount, sql, stage !== 'keywords-match' && stage !== 'ilike-match');
+    console.log(`   stage    : ${stage}`);
     return result.rows;
   } catch (err) {
     console.error('[RAG ERROR] FAQ search failed:', err.message);
@@ -109,21 +145,34 @@ async function searchFAQ(searchQuery, limit = 5) {
 
 // ---------------------------------------------------------------------------
 // searchInsuranceProducts
+//
+// Staged search — cheapest/most-trusted signal first:
+//   Stage 1: keywords[] overlap. This is a human-curated array (nicknames,
+//            aliases like "haba haba", Swahili/slang terms) and is the most
+//            reliable signal we have, so it's tried on its own first and,
+//            if it returns anything, we trust it and skip the noisier
+//            ILIKE stage entirely. Ranked by how many keywords overlapped.
+//   Stage 2: ILIKE across name/category/sub_category/description/benefits
+//            (name was previously missing here — that's how "Haba Haba"
+//            slipped through when it wasn't yet tagged in keywords[]).
+//   Stage 3: no match anywhere → broad active-product sample so the AI
+//            always has some grounded product context to work from.
 // ---------------------------------------------------------------------------
 async function searchInsuranceProducts(searchQuery, limit = 5) {
   try {
     const keywords = extractKeywords(searchQuery);
+    const PRODUCT_COLUMNS = `id, name, category, sub_category, description, benefits, keywords,
+               COALESCE(source_url, NULL) AS source_url`;
 
     let result;
     let sql;
-    let isFallback = false;
+    let stage = 'none';
 
     if (keywords.length === 0) {
-      // No keywords → return a broad sample of all active products
-      isFallback = true;
+      // No usable keywords → broad sample straight away
+      stage = 'fallback-all';
       sql = `
-        SELECT id, category, sub_category, description, benefits, keywords,
-               COALESCE(source_url, NULL) AS source_url
+        SELECT ${PRODUCT_COLUMNS}
         FROM insurance_products
         WHERE is_active = true
         ORDER BY category, sub_category
@@ -131,41 +180,62 @@ async function searchInsuranceProducts(searchQuery, limit = 5) {
       `;
       result = await query(sql, [limit]);
     } else {
-      const { conditions, params, nextIndex } = buildIlikeConditions(
-        keywords,
-        ['category', 'sub_category', 'description', 'benefits'],
-        1
-      );
+      // ── Stage 1: keywords[] overlap only ──────────────────────────────
+      // Rank by number of overlapping keywords (best match first) using
+      // cardinality(array intersection) rather than a plain array &&
+      // boolean, so a product tagged with 3 matching keywords outranks
+      // one tagged with just 1.
       sql = `
-        SELECT id, category, sub_category, description, benefits, keywords,
-               COALESCE(source_url, NULL) AS source_url
+        SELECT ${PRODUCT_COLUMNS},
+               cardinality(
+                 ARRAY(SELECT unnest(keywords) INTERSECT SELECT unnest($1::text[]))
+               ) AS keyword_matches
         FROM insurance_products
         WHERE is_active = true
-          AND (
-            ${conditions}
-            OR keywords && $${nextIndex}::text[]
-          )
-        ORDER BY category, sub_category
-        LIMIT $${nextIndex + 1}
+          AND keywords && $1::text[]
+        ORDER BY keyword_matches DESC, category, sub_category
+        LIMIT $2
       `;
-      result = await query(sql, [...params, toPgArray(keywords), limit]);
+      result = await query(sql, [toPgArray(keywords), limit]);
 
-      // Fallback: nothing matched → return top rows so AI always has product context
-      if (result.rowCount === 0) {
-        isFallback = true;
+      if (result.rowCount > 0) {
+        stage = 'keywords-match';
+      } else {
+        // ── Stage 2: ILIKE fallback across name + text fields ───────────
+        const { conditions, params, nextIndex } = buildIlikeConditions(
+          keywords,
+          ['name', 'category', 'sub_category', 'description', 'benefits'],
+          1
+        );
         sql = `
-          SELECT id, category, sub_category, description, benefits, keywords,
-                 COALESCE(source_url, NULL) AS source_url
+          SELECT ${PRODUCT_COLUMNS}
           FROM insurance_products
           WHERE is_active = true
+            AND (${conditions})
           ORDER BY category, sub_category
-          LIMIT $1
+          LIMIT $${nextIndex}
         `;
-        result = await query(sql, [limit]);
+        result = await query(sql, [...params, limit]);
+
+        if (result.rowCount > 0) {
+          stage = 'ilike-match';
+        } else {
+          // ── Stage 3: nothing matched anywhere → broad active sample ──
+          stage = 'fallback-all';
+          sql = `
+            SELECT ${PRODUCT_COLUMNS}
+            FROM insurance_products
+            WHERE is_active = true
+            ORDER BY category, sub_category
+            LIMIT $1
+          `;
+          result = await query(sql, [limit]);
+        }
       }
     }
 
-    logSearchDebug('insurance_products', keywords, result.rowCount, sql, isFallback);
+    logSearchDebug('insurance_products', keywords, result.rowCount, sql, stage !== 'keywords-match' && stage !== 'ilike-match');
+    console.log(`   stage    : ${stage}`);
     return result.rows;
   } catch (err) {
     console.error('[RAG ERROR] Insurance products search failed:', err.message);
@@ -456,6 +526,7 @@ async function getRecommendation(need) {
         description:     matches[0].description || '',
         matchedProducts: matches.map(m => ({
           id:           m.id,
+          name:         m.name,
           category:     m.category,
           sub_category: m.sub_category,
           description:  m.description,

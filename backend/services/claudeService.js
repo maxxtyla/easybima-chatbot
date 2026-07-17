@@ -32,8 +32,9 @@ function buildContextMessage(contextData = {}) {
     parts.push('\n## CIC Insurance Products');
     contextData.products.forEach((p, idx) => {
       const src = p.source_url ? ` (source: ${p.source_url})` : '';
-      const name = p.sub_category ? `${p.category} — ${p.sub_category}` : p.category;
-      parts.push(`${idx + 1}. **${name}**`);
+      const label = p.name || (p.sub_category ? `${p.category} — ${p.sub_category}` : p.category);
+      const categoryLine = p.sub_category ? `${p.category} — ${p.sub_category}` : p.category;
+      parts.push(`${idx + 1}. **${label}**${p.name ? ` (${categoryLine})` : ''}`);
       if (p.description) parts.push(`   Description: ${p.description}`);
       if (p.benefits)    parts.push(`   Benefits: ${p.benefits}${src}`);
     });
@@ -46,11 +47,10 @@ function buildContextMessage(contextData = {}) {
       parts.push(`Description: ${contextData.recommendations.description}`);
     }
     contextData.recommendations.matchedProducts.forEach((p, idx) => {
-      const name = p.sub_category
-        ? `${p.category} — ${p.sub_category}`
-        : (p.name || p.category);
+      const label = p.name || (p.sub_category ? `${p.category} — ${p.sub_category}` : p.category);
+      const categoryLine = p.sub_category ? `${p.category} — ${p.sub_category}` : p.category;
       const src = p.source_url ? ` (source: ${p.source_url})` : '';
-      parts.push(`${idx + 1}. ${name}${src}`);
+      parts.push(`${idx + 1}. ${label}${p.name ? ` (${categoryLine})` : ''}${src}`);
       if (p.description) parts.push(`   ${p.description}`);
       if (p.benefits)    parts.push(`   Benefits: ${p.benefits}`);
     });
@@ -163,9 +163,18 @@ function logOpenRouterResponse(data, aiResponse) {
   const reasoningTok  = usage.completion_tokens_details?.reasoning_tokens || 0;
   const cost          = usage.cost ?? 0;
 
-  // Token budget warning
+  // Token budget warning — maxTokens (CLAUDE_MAX_TOKENS / the max_tokens
+  // param sent to OpenRouter) caps COMPLETION tokens only. Comparing it
+  // against totalTok (prompt + completion) was a false-positive generator:
+  // any large prompt context (multiple product/company/FAQ rows stuffed
+  // in, as happens more often now) would trip "TOKEN LIMIT HIT" even
+  // though the actual generation finished cleanly with finish_reason
+  // "stop" and nowhere near its completion budget. Compare completionTok
+  // against maxTokens instead, and treat finish_reason === 'length' as the
+  // authoritative signal (that's what the provider sets when it actually
+  // truncates output).
   const maxTokens = parseInt(process.env.CLAUDE_MAX_TOKENS) || 2048;
-  const atLimit   = totalTok >= maxTokens;
+  const atLimit   = finish === 'length' || completionTok >= maxTokens;
 
   console.log('\n──────────────────────────────────────────────');
   console.log(`📦 OpenRouter Response`);

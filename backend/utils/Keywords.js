@@ -20,6 +20,7 @@ const STOP_WORDS = new Set([
   'stay','such','tell','tend','time','type','unto','upon','used','view',
   'ways','wish','work','year','years','offer','offers','product','products',
   'insurance','insure','insured','policy','policies','does','have','please',
+  'cic',
   'would','could','should','shall','might','must','been','being','where',
   'there','their','those','these','other','every','which','while','before',
 ]);
