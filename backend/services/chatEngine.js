@@ -35,6 +35,7 @@ const {
 } = require('./policyService');
 const { rankResults } = require('../utils/rankResults');
 const { classifyIntent } = require('../utils/intentRouter');
+const { RAG_LIMITS } = require('../config/constants');
 
 /**
  * Core pipeline. Channel-specific controllers call this and then format
@@ -292,11 +293,11 @@ console.log(`🚨 [Escalation check] "${message}" → needsEscalation=${needsEsc
   }
 
   // ── STEP 5b: Rank & assemble context ──────────────────────────────────
-  const rankedFAQs = rankResults(faqMatches, message).slice(0, 3);
-  const rankedCompany = rankResults(companyInfoMatches, message).slice(0, 3);
-  const rankedProducts = rankResults(directProducts, message).slice(0, 5);
-  const rankedBranches = rankResults(branches, message).slice(0, 5);
-  const rankedClaims = rankResults(claimsMatches, message).slice(0, 5);
+  const rankedFAQs = rankResults(faqMatches, message).slice(0, RAG_LIMITS.FAQ_TOP_K);
+  const rankedCompany = rankResults(companyInfoMatches, message).slice(0, RAG_LIMITS.COMPANY_TOP_K);
+  const rankedProducts = rankResults(directProducts, message).slice(0, RAG_LIMITS.PRODUCTS_TOP_K);
+  const rankedBranches = rankResults(branches, message).slice(0, RAG_LIMITS.BRANCHES_TOP_K);
+  const rankedClaims = rankResults(claimsMatches, message).slice(0, RAG_LIMITS.CLAIMS_TOP_K);
 
   const contextData = {};
 

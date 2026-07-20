@@ -1,10 +1,11 @@
 const rateLimit = require('express-rate-limit');
+const { RATE_LIMIT } = require('../config/constants');
 
 // STRICT limiter for unauthenticated public endpoints
 // Protects against abuse but keeps limits reasonable
 const rateLimiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 60 * 1000, // 1 minute
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 30,
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || RATE_LIMIT.WINDOW_MS,
+  max: RATE_LIMIT.PUBLIC_MAX,
   message: {
     error: 'Too many requests',
     message: 'You have exceeded the rate limit. Please try again later.',
@@ -28,8 +29,8 @@ const rateLimiter = rateLimit({
 // Session-based rate limiting allows conversations to flow naturally
 // without hitting rate limits from rapid back-and-forth messages
 const chatRateLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 100, // 100 messages per minute per session is very generous
+  windowMs: RATE_LIMIT.WINDOW_MS,
+  max: RATE_LIMIT.CHAT_MAX, // 100 messages per minute per session is very generous
   message: {
     error: 'Too many requests',
     message: 'Too many messages. Please slow down.',
@@ -68,8 +69,8 @@ const chatRateLimiter = rateLimit({
 // by the authenticated agent's id (not shared IP) so agents never throttle
 // each other. This must be mounted AFTER requireAgent so req.agent exists.
 const staffRateLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: parseInt(process.env.STAFF_RATE_LIMIT_MAX) || 300,
+  windowMs: RATE_LIMIT.WINDOW_MS,
+  max: RATE_LIMIT.STAFF_MAX,
   message: {
     error: 'Too many requests',
     message: 'Too many requests from the staff dashboard. Please slow down.',
@@ -85,8 +86,8 @@ const staffRateLimiter = rateLimit({
 
 // Stricter limiter for specific endpoints
 const strictRateLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 10, // 10 requests per minute
+  windowMs: RATE_LIMIT.WINDOW_MS,
+  max: RATE_LIMIT.STRICT_MAX,
   message: {
     error: 'Too many requests',
     message: 'This endpoint has a stricter rate limit. Please slow down.',
@@ -101,8 +102,8 @@ const strictRateLimiter = rateLimit({
 // together. Key by the sender's WhatsApp number instead, and allow a
 // generous burst since real conversations can be fast back-and-forth.
 const whatsappRateLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: parseInt(process.env.WHATSAPP_RATE_LIMIT_MAX) || 20,
+  windowMs: RATE_LIMIT.WINDOW_MS,
+  max: RATE_LIMIT.WHATSAPP_MAX,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => req.body?.From || req.ip || 'unknown',

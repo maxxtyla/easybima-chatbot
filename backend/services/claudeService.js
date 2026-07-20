@@ -1,6 +1,7 @@
 require('dotenv').config();
 const { SYSTEM_PROMPT } = require('../prompts/systemPrompt');
 const { sanitizeForUser } = require('../utils/sanitizeResponse');
+const { LLM } = require('../config/constants');
 
 /**
  * Builds the RAG context system message injected before the conversation.
@@ -173,7 +174,7 @@ function logOpenRouterResponse(data, aiResponse) {
   // against maxTokens instead, and treat finish_reason === 'length' as the
   // authoritative signal (that's what the provider sets when it actually
   // truncates output).
-  const maxTokens = parseInt(process.env.CLAUDE_MAX_TOKENS) || 2048;
+  const maxTokens = LLM.DEFAULT_MAX_TOKENS;
   const atLimit   = finish === 'length' || completionTok >= maxTokens;
 
   console.log('\n──────────────────────────────────────────────');
@@ -243,10 +244,10 @@ async function getClaudeResponse(
 ) {
   try {
     const apiKey   = process.env.OPENROUTER_API_KEY;
-    const model    = process.env.OPENROUTER_MODEL || 'anthropic/claude-3.5-sonnet';
+    const model    = LLM.DEFAULT_MODEL;
     // Raise the default to 2048 so answers aren't cut off at 101 tokens
-    const maxTokens = parseInt(process.env.CLAUDE_MAX_TOKENS) || 2048;
-    const temperature = parseFloat(process.env.CLAUDE_TEMPERATURE) || 0.2;
+    const maxTokens = LLM.DEFAULT_MAX_TOKENS;
+    const temperature = LLM.DEFAULT_TEMPERATURE;
 
     if (!apiKey) {
       throw new Error('OPENROUTER_API_KEY not set in environment variables');
@@ -265,7 +266,7 @@ async function getClaudeResponse(
           'Do not hallucinate product names, prices, or branch addresses.',
       },
       ...(contextMessage ? [contextMessage] : []),
-      ...conversationHistory.slice(-8).map(msg => ({
+      ...conversationHistory.slice(-LLM.HISTORY_WINDOW_TURNS).map(msg => ({
         role:    msg.role,
         content: msg.content,
       })),

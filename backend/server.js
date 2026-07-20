@@ -20,6 +20,45 @@ const { requireAgent } = require('./middleware/agentAuth');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// ─────────────────────────────────────────────────────────────────────────
+// MIDDLEWARE ORDER IS LOAD-BEARING — READ BEFORE ADDING A ROUTE
+//
+// This has already caused one production bug: staff dashboard traffic was
+// getting caught by the public per-IP rate limiter because /api/staff/*
+// was mounted AFTER app.use(rateLimiter). Do not reorder the blocks below
+// without re-reading why each one is where it is.
+//
+// Required order, top to bottom:
+//   1. helmet()                — security headers on every response
+//   2. cors()                  — must run before any route handles the
+//                                 request, including error responses
+//   3. body/cookie parsers     — every route needs req.body/req.cookies
+//   4. /health                 — before ANY rate limiter; health checks
+//                                 must never be throttled
+//   5. /api/chat + chatRateLimiter
+//                              — mounted BEFORE the generic `rateLimiter`
+//                                 below so chat gets its own (lenient,
+//                                 session-keyed) limiter instead of
+//                                 double-counting against the public one
+//   6. app.use(rateLimiter)    — generic public/per-IP limiter, applies
+//                                 to everything mounted AFTER this line
+//   7. /api/whatsapp           — has its own whatsappRateLimiter applied
+//                                 inside routes/whatsapp.js (keyed by
+//                                 phone number, not IP — Twilio shares IPs)
+//   8. /api/staff/auth         — login endpoint, public but should stay
+//                                 under the generic limiter (brute-force
+//                                 protection)
+//   9. /api/staff/tickets      — requireAgent MUST run before
+//                                 staffRateLimiter, because staffRateLimiter
+//                                 keys off req.agent.sub (the authenticated
+//                                 agent id), not IP — this is what fixes
+//                                 the shared-office-IP collision bug
+//
+// If you add a new route group, decide explicitly: does it need its own
+// rate limiter (like chat/whatsapp/staff), or is the generic public
+// `rateLimiter` correct for it? Don't just mount it wherever's convenient.
+// ─────────────────────────────────────────────────────────────────────────
+
 // Security middleware
 app.use(helmet({
   contentSecurityPolicy: {

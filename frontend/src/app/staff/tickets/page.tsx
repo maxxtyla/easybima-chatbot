@@ -9,10 +9,10 @@ const STATUS_OPTIONS: TicketStatus[] = ['open', 'assigned', 'in_progress', 'pend
 const PRIORITY_OPTIONS: TicketPriority[] = ['urgent', 'high', 'medium', 'low'];
 
 const PRIORITY_STYLES: Record<TicketPriority, string> = {
-  urgent: 'bg-red-100 text-red-800 border-red-200',
-  high: 'bg-orange-100 text-orange-800 border-orange-200',
-  medium: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-  low: 'bg-neutral-100 text-neutral-600 border-neutral-200',
+  urgent: 'bg-red-500/15 text-red-300 border-red-500/30',
+  high: 'bg-orange-500/15 text-orange-300 border-orange-500/30',
+  medium: 'bg-yellow-500/15 text-yellow-300 border-yellow-500/30',
+  low: 'bg-neutral-500/15 text-neutral-300 border-neutral-500/30',
 };
 
 const STATUS_LABELS: Record<TicketStatus, string> = {
@@ -127,6 +127,24 @@ export default function TicketQueuePage() {
     };
   }, []);
 
+  // Prevent the browser's rubber-band/overscroll bounce (mouse wheel past
+  // the top, or touch bounce on mobile) from revealing the default white
+  // <html>/<body> background behind this dark page. Scoped to just this
+  // page's lifetime so the lighter customer-facing chat pages elsewhere in
+  // the app are unaffected.
+  useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    const prevHtmlBg = html.style.backgroundColor;
+    const prevBodyBg = body.style.backgroundColor;
+    html.style.backgroundColor = '#000000';
+    body.style.backgroundColor = '#000000';
+    return () => {
+      html.style.backgroundColor = prevHtmlBg;
+      body.style.backgroundColor = prevBodyBg;
+    };
+  }, []);
+
   useEffect(() => {
     loadTickets();
     // Simple polling backstop — swap for websockets later if the queue
@@ -152,10 +170,10 @@ export default function TicketQueuePage() {
   }
 
   return (
-    <div className="min-h-screen bg-neutral-50">
-      <header className="bg-cic-white border-b border-neutral-200 px-6 py-4 flex items-center justify-between">
+    <div className="min-h-screen bg-black overscroll-none">
+      <header className="bg-black border-b border-white/10 px-6 py-4 flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-semibold text-cic-gray flex items-center gap-2">
+          <h1 className="text-lg font-semibold text-white flex items-center gap-2">
             Customer Care Tickets
             {unreadTicketIds.size > 0 && (
               <span
@@ -166,13 +184,13 @@ export default function TicketQueuePage() {
               </span>
             )}
           </h1>
-          {agent && <p className="text-sm text-neutral-500">Signed in as {agent.fullName} · {agent.role}</p>}
+          {agent && <p className="text-sm text-neutral-400">Signed in as {agent.fullName} · {agent.role}</p>}
         </div>
         <div className="flex items-center gap-4">
-          <button onClick={() => router.push('/staff/profile')} className="text-sm text-neutral-500 hover:text-cic-red">
+          <button onClick={() => router.push('/staff/profile')} className="text-sm text-neutral-400 hover:text-cic-red-light">
             My profile
           </button>
-          <button onClick={handleLogout} className="text-sm text-neutral-500 hover:text-cic-red">Sign out</button>
+          <button onClick={handleLogout} className="text-sm text-neutral-400 hover:text-cic-red-light">Sign out</button>
         </div>
       </header>
 
@@ -180,35 +198,39 @@ export default function TicketQueuePage() {
         <select
           value={status}
           onChange={(e) => setStatus(e.target.value as TicketStatus | '')}
-          className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm bg-cic-white"
+          className="rounded-lg border border-white/10 px-3 py-1.5 text-sm bg-black text-white [color-scheme:dark]"
         >
-          <option value="">All statuses</option>
-          {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
+          <option value="" style={{ backgroundColor: '#000000', color: '#fff' }}>All statuses</option>
+          {STATUS_OPTIONS.map((s) => (
+            <option key={s} value={s} style={{ backgroundColor: '#000000', color: '#fff' }}>{STATUS_LABELS[s]}</option>
+          ))}
         </select>
 
         <select
           value={priority}
           onChange={(e) => setPriority(e.target.value as TicketPriority | '')}
-          className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm bg-cic-white"
+          className="rounded-lg border border-white/10 px-3 py-1.5 text-sm bg-black text-white [color-scheme:dark]"
         >
-          <option value="">All priorities</option>
-          {PRIORITY_OPTIONS.map((p) => <option key={p} value={p}>{p[0].toUpperCase() + p.slice(1)}</option>)}
+          <option value="" style={{ backgroundColor: '#000000', color: '#fff' }}>All priorities</option>
+          {PRIORITY_OPTIONS.map((p) => (
+            <option key={p} value={p} style={{ backgroundColor: '#000000', color: '#fff' }}>{p[0].toUpperCase() + p.slice(1)}</option>
+          ))}
         </select>
 
-        <span className="text-sm text-neutral-500 ml-auto">{total} ticket{total === 1 ? '' : 's'}</span>
+        <span className="text-sm text-neutral-400 ml-auto">{total} ticket{total === 1 ? '' : 's'}</span>
       </div>
 
       <div className="px-6 pb-8">
-        {error && <p className="text-sm text-cic-red-dark bg-red-50 rounded-md px-3 py-2 mb-4">{error}</p>}
+        {error && <p className="text-sm text-red-300 bg-red-500/10 border border-red-500/20 rounded-md px-3 py-2 mb-4">{error}</p>}
 
         {isLoading && tickets.length === 0 ? (
           <p className="text-sm text-neutral-500">Loading tickets…</p>
         ) : tickets.length === 0 ? (
           <p className="text-sm text-neutral-500">No tickets match these filters.</p>
         ) : (
-          <div className="bg-cic-white rounded-xl border border-neutral-200 overflow-hidden">
+          <div className="bg-black rounded-xl border border-white/10 overflow-hidden">
             <table className="w-full text-sm">
-              <thead className="bg-neutral-50 text-neutral-500 text-xs uppercase tracking-wide">
+              <thead className="bg-black text-neutral-500 text-xs uppercase tracking-wide">
                 <tr>
                   <th className="text-left px-4 py-3 font-medium">Ticket</th>
                   <th className="text-left px-4 py-3 font-medium">Customer</th>
@@ -219,7 +241,7 @@ export default function TicketQueuePage() {
                   <th className="text-left px-4 py-3 font-medium">SLA</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-neutral-100">
+              <tbody className="divide-y divide-white/5">
                 {tickets.map((ticket) => {
                   const sla = formatSlaCountdown(ticket.sla_due_at);
                   const isUnread = unreadTicketIds.has(ticket.id);
@@ -227,38 +249,38 @@ export default function TicketQueuePage() {
                     <tr
                       key={ticket.id}
                       onClick={() => openTicket(ticket.id)}
-                      className={`cursor-pointer hover:bg-neutral-50 transition-colors ${isUnread ? 'bg-emerald-50' : ''}`}
+                      className={`cursor-pointer hover:bg-white/[0.06] transition-colors ${isUnread ? 'bg-emerald-500/10' : ''}`}
                     >
-                      <td className="px-4 py-3 font-medium text-cic-gray whitespace-nowrap">
+                      <td className="px-4 py-3 font-medium text-white whitespace-nowrap">
                         <span className="flex items-center gap-1.5">
                           {isUnread && (
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0 animate-pulse" aria-label="New message" />
                           )}
                           {ticket.ticket_number}
                           {isUnread && (
-                            <span className="inline-flex items-center rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5">
+                            <span className="inline-flex items-center rounded-full bg-emerald-500/15 text-emerald-300 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5">
                               New
                             </span>
                           )}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-neutral-700 whitespace-nowrap">
+                      <td className="px-4 py-3 text-neutral-300 whitespace-nowrap">
                         {ticket.customer_name || ticket.customer_phone || ticket.customer_email || '—'}
-                        <span className="block text-xs text-neutral-400">
+                        <span className="block text-xs text-neutral-500">
                           {ticket.channel}
                           {(ticket.customer_email || ticket.customer_phone) && ' · '}
                           {ticket.customer_email || ticket.customer_phone || ''}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-neutral-600 max-w-xs truncate">{ticket.subject}</td>
+                      <td className="px-4 py-3 text-neutral-400 max-w-xs truncate">{ticket.subject}</td>
                       <td className="px-4 py-3">
                         <span className={`inline-block rounded-full border px-2 py-0.5 text-xs font-medium ${PRIORITY_STYLES[ticket.priority]}`}>
                           {ticket.priority}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-neutral-600 whitespace-nowrap">{STATUS_LABELS[ticket.status]}</td>
-                      <td className="px-4 py-3 text-neutral-600 whitespace-nowrap">{ticket.assigned_agent_name || '— unassigned —'}</td>
-                      <td className={`px-4 py-3 whitespace-nowrap text-xs ${sla?.overdue ? 'text-cic-red-dark font-medium' : 'text-neutral-500'}`}>
+                      <td className="px-4 py-3 text-neutral-400 whitespace-nowrap">{STATUS_LABELS[ticket.status]}</td>
+                      <td className="px-4 py-3 text-neutral-400 whitespace-nowrap">{ticket.assigned_agent_name || '— unassigned —'}</td>
+                      <td className={`px-4 py-3 whitespace-nowrap text-xs ${sla?.overdue ? 'text-cic-red-light font-medium' : 'text-neutral-500'}`}>
                         {sla ? sla.text : '—'}
                       </td>
                     </tr>

@@ -1,5 +1,25 @@
 const validator = require('validator');
 
+// ─────────────────────────────────────────────────────────────────────────
+// IMPORTANT — WHAT THIS MIDDLEWARE IS AND ISN'T:
+//
+// This is NOT the app's XSS defense boundary. It's a shallow, best-effort
+// filter that rejects a few obviously malicious payload shapes before they
+// reach the LLM prompt (mainly to stop someone pasting a raw <script> tag
+// or javascript: URI into the chat, which would otherwise sit in
+// conversation history / ticket transcripts unmodified).
+//
+// The actual XSS defense is downstream, structural, and doesn't depend on
+// this middleware catching everything:
+//   - Postgres queries are parameterized ($1/$2) everywhere, so nothing
+//     here needs to escape SQL.
+//   - The frontend renders AI/agent messages via react-markdown, not
+//     dangerouslySetInnerHTML, so arbitrary HTML in a message can't
+//     execute even if it slips past this filter.
+//
+// Do not add reliance on this filter as a security boundary elsewhere in
+// the app on the assumption it's "the sanitizer" — it isn't one.
+// ─────────────────────────────────────────────────────────────────────────
 const validateInput = (req, res, next) => {
   const { message, sessionId } = req.body;
 
@@ -30,7 +50,9 @@ const validateInput = (req, res, next) => {
   // which corrupts the plain-text prompt sent to the AI model.
   const sanitizedMessage = message.trim();
 
-  // Block actual script injection patterns before passing to AI
+  // Reject obviously malicious payload shapes before they reach the LLM
+  // prompt / get persisted to conversation history. This is a narrow
+  // blocklist, not a sanitizer — see the module-level comment above.
   const suspiciousPatterns = [
     /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
     /javascript:/gi,

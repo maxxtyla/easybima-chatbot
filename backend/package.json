@@ -1,7 +1,7 @@
 {
   "name": "easybima-backend",
   "version": "1.0.0",
-  "description": "EasyBima AI Chatbot Backend for CIC Insurance Group",
+  "description": "Bima AI Chatbot Backend for CIC Insurance Group",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

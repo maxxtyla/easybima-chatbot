@@ -21,6 +21,7 @@
 
 const { extractKeywords } = require('./keywords');
 const { query } = require('../config/database');
+const { RAG_CACHE } = require('../config/constants');
 
 const BRANCH_KEYWORDS = [
   'branch', 'branches', 'office', 'location', 'near me', 'find', 'where',
@@ -116,7 +117,7 @@ function matchesAny(lowerMsg, keywordList) {
 // Cached in memory (5 min TTL) since this list barely changes and we don't
 // want a DB round trip on every single message.
 // ---------------------------------------------------------------------------
-const LOCATION_CACHE_TTL_MS = 5 * 60 * 1000;
+const LOCATION_CACHE_TTL_MS = RAG_CACHE.LOCATION_TTL_MS;
 let locationCache = null; // Set<string>
 let locationCacheExpiry = 0;
 
@@ -183,7 +184,7 @@ const PRODUCT_TERM_NOISE = new Set([
   'and', 'the', 'for', 'with', 'our', 'your',
 ]);
 
-const FAQ_CACHE_TTL_MS = 5 * 60 * 1000;
+const FAQ_CACHE_TTL_MS = RAG_CACHE.FAQ_TERM_TTL_MS;
 let faqTermCache = null; // Set<string>
 let faqTermCacheExpiry = 0;
 
@@ -220,7 +221,7 @@ async function getKnownFAQTerms() {
   }
 }
 
-const PRODUCT_CACHE_TTL_MS = 5 * 60 * 1000;
+const PRODUCT_CACHE_TTL_MS = RAG_CACHE.PRODUCT_TERM_TTL_MS;
 let productTermCache = null; // Set<string>
 let productTermCacheExpiry = 0;
 

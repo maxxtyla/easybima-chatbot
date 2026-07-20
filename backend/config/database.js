@@ -44,15 +44,39 @@ const testConnection = async () => {
 };
 
 // Query helper
+//
+// Logging policy: query TEXT (the SQL statement shape) is safe to log —
+// it's always parameterized ($1, $2...) in this codebase, never raw
+// values. Query PARAMS are NOT safe to log — they can carry customer
+// messages, phone numbers, emails, or ticket notes. We log query shape +
+// timing always (cheap, useful for perf debugging), but only log params
+// when explicitly opted into via DB_LOG_PARAMS=true, and only outside
+// production even then — this mirrors the same "never let sensitive
+// content leak into logs" posture as sanitizeResponse.js's CoT handling.
+const SHOULD_LOG_QUERIES = process.env.NODE_ENV !== 'production' || process.env.DB_QUERY_LOGGING === 'true';
+const SHOULD_LOG_PARAMS = process.env.DB_LOG_PARAMS === 'true' && process.env.NODE_ENV !== 'production';
+
 const query = async (text, params) => {
   const start = Date.now();
   try {
     const result = await pool.query(text, params);
     const duration = Date.now() - start;
-    console.log('Executed query', { text: text.substring(0, 50), duration, rows: result.rowCount });
+    if (SHOULD_LOG_QUERIES) {
+      const logPayload = { text: text.replace(/\s+/g, ' ').trim().substring(0, 80), duration, rows: result.rowCount };
+      if (SHOULD_LOG_PARAMS) logPayload.params = params;
+      console.log('Executed query', logPayload);
+    }
     return result;
   } catch (err) {
-    console.error('Query error:', err);
+    // Error logging deliberately omits `params` for the same reason —
+    // an error log is exactly the kind of place PII silently ends up
+    // getting shipped to log aggregators/Sentry with no one noticing.
+    console.error('Query error:', {
+      message: err.message,
+      code: err.code,
+      text: text.substring(0, 80),
+      stack: process.env.NODE_ENV !== 'production' ? err.stack : undefined,
+    });
     throw err;
   }
 };

@@ -7,20 +7,19 @@
 // by) and the raw score + matched signals (what justifies it later, and
 // what you'd tune if the thresholds turn out wrong in practice).
 
+const { TICKET_PRIORITY } = require('../config/constants');
+
 const URGENT_KEYWORDS = ['emergency', 'urgent', 'asap', 'accident', 'dispute'];
 const COMPLAINT_KEYWORDS = ['complaint', 'escalate', 'manager', 'supervisor', 'terrible', 'awful'];
 
-const SLA_HOURS_BY_TIER = {
-  urgent: 1,
-  high: 4,
-  medium: 24,
-  low: 72,
-};
+const SLA_HOURS_BY_TIER = TICKET_PRIORITY.SLA_HOURS_BY_TIER;
+const { urgent: URGENT_THRESHOLD, high: HIGH_THRESHOLD, medium: MEDIUM_THRESHOLD } =
+  TICKET_PRIORITY.TIER_THRESHOLDS;
 
 function scoreToTier(score) {
-  if (score >= 6) return 'urgent';
-  if (score >= 4) return 'high';
-  if (score >= 2) return 'medium';
+  if (score >= URGENT_THRESHOLD) return 'urgent';
+  if (score >= HIGH_THRESHOLD) return 'high';
+  if (score >= MEDIUM_THRESHOLD) return 'medium';
   return 'low';
 }
 
@@ -37,28 +36,30 @@ function computeTicketPriority({ message = '', sentiment = 'neutral', category, 
   const signals = [];
   let score = 0;
 
+  const WEIGHTS = TICKET_PRIORITY.SIGNAL_WEIGHTS;
+
   if (sentiment === 'angry') {
-    score += 2;
+    score += WEIGHTS.ANGRY_SENTIMENT;
     signals.push('angry_sentiment');
   }
 
   if (URGENT_KEYWORDS.some(kw => lowerMessage.includes(kw))) {
-    score += 2;
+    score += WEIGHTS.URGENT_KEYWORD;
     signals.push('urgent_keyword');
   }
 
   if (COMPLAINT_KEYWORDS.some(kw => lowerMessage.includes(kw))) {
-    score += 2;
+    score += WEIGHTS.COMPLAINT_KEYWORD;
     signals.push('complaint_keyword');
   }
 
   if (category === 'claim' || category === 'complaint') {
-    score += 1;
+    score += WEIGHTS.SENSITIVE_CATEGORY;
     signals.push('sensitive_category');
   }
 
   if (isRepeatEscalation) {
-    score += 1;
+    score += WEIGHTS.REPEAT_ESCALATION;
     signals.push('repeat_escalation');
   }
 
