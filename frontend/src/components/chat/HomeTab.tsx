@@ -2,8 +2,8 @@
 
 import React from 'react'
 import { ProductAdCarousel } from './ProductAdCarousel'
-import { WhatsAppIcon, ChevronRightIcon, MessageIcon } from './UiIcons'
-import { getWhatsAppChatUrl } from '@/lib/config'
+import { WhatsAppIcon, XSocialIcon, FacebookIcon, YoutubeIcon, InstagramIcon, ChevronRightIcon, MessageIcon } from './UiIcons'
+import { getWhatsAppChatUrl, SOCIAL_LINKS } from '@/lib/config'
 
 interface HomeTabProps {
   onStartChat: () => void
@@ -96,6 +96,78 @@ export function HomeTab({ onStartChat, hasActiveConversation }: HomeTabProps) {
             <div>
               <p className="text-sm font-semibold text-cic-gray">Reach us on WhatsApp</p>
               <p className="text-xs text-neutral-500">Chat with customer care</p>
+            </div>
+          </div>
+          <ChevronRightIcon className="w-4 h-4 text-neutral-400 flex-shrink-0" />
+        </a>
+
+        <a
+          href={SOCIAL_LINKS.x}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg bg-black/5 border border-black/20 hover:bg-black/10 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-full bg-black text-white flex items-center justify-center flex-shrink-0">
+              <XSocialIcon className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-cic-gray">Follow us on X</p>
+              <p className="text-xs text-neutral-500">Latest news and updates</p>
+            </div>
+          </div>
+          <ChevronRightIcon className="w-4 h-4 text-neutral-400 flex-shrink-0" />
+        </a>
+
+        <a
+          href={SOCIAL_LINKS.facebook}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg bg-[#1877F2]/10 border border-[#1877F2]/30 hover:bg-[#1877F2]/15 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-full bg-[#1877F2] text-white flex items-center justify-center flex-shrink-0">
+              <FacebookIcon className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-cic-gray">Follow us on Facebook</p>
+              <p className="text-xs text-neutral-500">Latest news and updates</p>
+            </div>
+          </div>
+          <ChevronRightIcon className="w-4 h-4 text-neutral-400 flex-shrink-0" />
+        </a>
+
+        <a
+          href={SOCIAL_LINKS.youtube}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg bg-black/5 border border-black/20 hover:bg-black/10 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-full bg-black text-white flex items-center justify-center flex-shrink-0">
+              <YoutubeIcon className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-cic-gray">Subscribe to our Youtube</p>
+              <p className="text-xs text-neutral-500">Latest news and updates</p>
+            </div>
+          </div>
+          <ChevronRightIcon className="w-4 h-4 text-neutral-400 flex-shrink-0" />
+        </a>
+
+        <a
+          href={SOCIAL_LINKS.instagram}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg bg-[#E4405F]/10 border border-[#E4405F]/30 hover:bg-[#E4405F]/15 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white flex items-center justify-center flex-shrink-0">
+              <InstagramIcon className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-cic-gray">Follow us on Instagram</p>
+              <p className="text-xs text-neutral-500">Latest news and updates</p>
             </div>
           </div>
           <ChevronRightIcon className="w-4 h-4 text-neutral-400 flex-shrink-0" />
