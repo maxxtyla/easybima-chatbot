@@ -24,6 +24,7 @@ maintaining or extending the chatbot/ticketing pipeline.
 9. [API Reference (Summary)](#9-api-reference-summary)
 10. [Testing](#10-testing)
 11. [Known Design Decisions & Gotchas](#11-known-design-decisions--gotchas)
+12. [Appendix A: Full Database Schema (DDL)](#appendix-a-full-database-schema-ddl)
 
 ---
 
@@ -760,12 +761,30 @@ lists), auto-links bare URLs into `[url](url)`, and collapses 3+ blank
 lines to 2. This exists because LLM output is inconsistent about strict
 Markdown syntax and this normalizes it before rendering.
 
-#### `lib/quickLinks.ts`
-A hand-edited array (`QUICK_LINKS`) of the shortcut buttons shown on the
-widget's Home tab (get a quote, open an MMF account, view pension plans).
-No admin UI — this file is the single source of truth; each entry has an
-`id`, `label`, `url` (absolute = opens in a new tab, relative = in-page
-navigation), and an `icon` key matching `QuickLinkIcon.tsx`.
+#### `lib/productAds.ts`
+A hand-edited array (`PRODUCT_ADS`) of CIC product adverts shown in the
+widget's "before you chat" surfaces (Home tab hero and the empty
+Conversation tab) — motor, medical, MMF, pension, etc. No admin UI; this
+file is the single source of truth. Each entry has an `id`,
+`eyebrow`/`title`/`blurb`/`cta` copy, a target `url`, an `icon`
+(`ProductIconKey`, matching `ProductIllustrations.tsx`), a `theme`
+(`red | plum | teal | gold | crimson | garnet`, mapped to pre-written
+Tailwind class strings in `ProductAdCarousel.tsx` since Tailwind needs full
+class names at build time), and an optional `badge`.
+
+#### `lib/notificationSound.ts`
+Two small browser-only helpers used by the **staff dashboard** to flag new
+activity while an agent's tab isn't focused:
+- `playNotificationSound(volume?)` — a synthesized two-note "ding-ding"
+  chime built entirely from the Web Audio API (no mp3/wav asset, so nothing
+  to host or license). Caches a single module-level `AudioContext` and
+  resumes it if the browser has auto-suspended it pending a user gesture.
+- `startTitleFlash(alertText, intervalMs?)` — alternates `document.title`
+  between the real title and `alertText` (e.g. "💬 New message") every
+  1.2s until the window regains focus, returning a `stop()` function.
+  Used on both the ticket queue (`staff/tickets/page.tsx`) and the ticket
+  workspace (`staff/tickets/[id]/page.tsx`) so an agent working another tab
+  notices a new ticket or a new customer reply.
 
 #### `lib/utils.ts`
 Small generic helpers: `cn(...)` (naive class-name joiner — a lighter
@@ -834,8 +853,8 @@ presentational consumers of it. Responsibilities:
 | `ChatWindow.tsx` | The panel's internal layout: header, ticket-info banner, tab bar (Home/Conversation), message list or home content, input bar. Tracks an unread-badge on the "Conversation" tab when a message arrives while the user is browsing "Home". Owns the currently-selected `replyTo` message state and wires it through to `InputBar`/`MessageBubble`. |
 | `Header.tsx` | Top bar — CIC logo, "Bima CIC'S AI Support" title, live status text ("Online and ready to help" vs "Connected to agent" + agent name badge), close (X) button. |
 | `TabBar.tsx` | Two-tab bottom nav (Home / Conversation) with an unread-dot on Conversation. |
-| `HomeTab.tsx` | The widget's landing content: a greeting card, a "Start/Continue conversation" button, the `QuickLinks` list, and a "Reach us on WhatsApp" deep link (`getWhatsAppChatUrl`). |
-| `QuickLinks.tsx` / `QuickLinkIcon.tsx` | Renders the `QUICK_LINKS` array as a list of icon+label buttons; `QuickLinkIcon` maps each closed icon-key to its inline SVG path. |
+| `HomeTab.tsx` | The widget's landing content: a greeting card, a "Start/Continue conversation" button, the `ProductAdCarousel`, and a "Reach us on WhatsApp" deep link (`getWhatsAppChatUrl`). |
+| `ProductAdCarousel.tsx` / `ProductIllustrations.tsx` | Renders the `PRODUCT_ADS` array as a themed, swipeable carousel of CIC product cards; `ProductIllustrations` maps each `ProductIconKey` to a small inline SVG glyph. |
 | `QuickQuestions.tsx` | The grid of starter-question buttons shown when a conversation is empty (in `ChatWindow`, list defined inline: "Get an insurance quote," "Buy an insurance Cover," "Tell me about CIC insurance Group"). |
 | `MessageList.tsx` | Scroll container with careful auto-scroll heuristics: user's own new message always scrolls fully into view; an incoming bot/agent message only nudges the scroll (rather than jumping) if the user is already near the bottom, and otherwise shows a "new message" pill instead of yanking their scroll position while they're reading history. |
 | `MessageBubble.tsx` | Renders one message — different bubble styling per role (`user`/`assistant`/`agent`/`system`), an avatar badge ("B" for bot, "A" for agent), a quoted reply-snippet block when `message.replyTo` is set, and a hover-revealed reply button. |
@@ -845,6 +864,7 @@ presentational consumers of it. Responsibilities:
 | `ReplyPreview.tsx` | The small "Replying to Bima / Agent / yourself" preview shown above the input when a reply is staged. |
 | `TicketInfo.tsx` | The compact status banner shown once a ticket exists: ticket number, color-coded status pill, live "time open" counter, and (for non-terminal tickets) a "Close ticket" button with its own inline confirm step. |
 | `ConfirmEndChatModal.tsx` | The "End this conversation?" confirmation dialog shown when closing the widget with an active conversation, with an extra warning if there's still an open support ticket. |
+| `ContactInfoModal.tsx` | The "How can we reach you?" prompt shown right after a live-support escalation, collecting email and/or phone (client-validated with simple email/phone regexes) and posting them via `POST /api/chat/contact-info` so an agent has a way to reach the customer outside the chat if needed. Has a "skip" path. |
 | `UiIcons.tsx` | A shared set of small inline SVG icon components (reply, pencil, trash, plus, check, X, chevrons, home, message, WhatsApp) used throughout the widget instead of an icon library dependency. |
 
 ### 6.6 Staff dashboard pages (`frontend/src/app/staff/`)
@@ -863,7 +883,10 @@ Auto-refreshes every 30 seconds (a polling backstop, with a comment noting
 this should be swapped for websockets if true real-time becomes necessary).
 Renders a filterable table with color-coded priority/status badges and a
 live SLA countdown (`formatSlaCountdown`, computed client-side from
-`sla_due_at` so it updates between polls without extra requests).
+`sla_due_at` so it updates between polls without extra requests). When a
+poll detects a new/changed ticket, it plays the notification chime and
+starts flashing the tab title (`lib/notificationSound.ts`) so an agent
+working in another tab notices.
 
 #### `staff/tickets/[id]/page.tsx`
 The **ticket workspace** — where an agent actually handles a conversation.
@@ -876,7 +899,9 @@ internal notes (`addTicketNote`), and send replies to the customer
 (`sendTicketMessage`, supporting the same reply-to-a-specific-message
 feature as the customer widget, via `replyToMessageId`). Surfaces a
 `deliveryWarning` inline if a WhatsApp send succeeded in saving the message
-but failed to actually deliver it.
+but failed to actually deliver it. Also plays the notification chime and
+flashes the tab title (`startTitleFlash('💬 New message')`) when a poll
+surfaces a new customer message while the tab is unfocused.
 
 #### `staff/profile/page.tsx`
 The agent's own profile — loads `getMe` + `getMyStats` in parallel, renders
@@ -938,10 +963,9 @@ and a logout button.
 ## 8. Running the Project Locally
 
 ```bash
-# 1. Database
+# 1. Database — run the full current schema from Appendix A
 createdb easybima            # or your DB of choice
-psql -d easybima -f <base schema — provided separately / by your DBA>
-psql -d easybima -f backend/database/migrations/2026_07_add_ticketing.sql
+psql -d easybima -f schema.sql   # save Appendix A's DDL as schema.sql first
 
 # 2. Backend
 cd backend
@@ -981,6 +1005,7 @@ Visit `http://localhost:3000` for the public site + chat widget, and
 | `POST /api/chat/end-session` | User-confirmed end: wipes messages, clears session. Body: `{ sessionId }`. |
 | `GET /api/chat/ticket/:sessionId` | Poll for ticket/agent state changes. |
 | `POST /api/chat/ticket/close` | Customer closes their own open ticket. Body: `{ sessionId }`. |
+| `POST /api/chat/contact-info` | Attach contact details to the session's open ticket, shown right after an escalation. Body: `{ sessionId, name?, email?, phone? }` — at least one of `email`/`phone` required. |
 | `GET /api/chat/health` | Liveness check. |
 
 ### WhatsApp (`/api/whatsapp`)
@@ -1018,10 +1043,17 @@ Visit `http://localhost:3000` for the public site + chat widget, and
 
 ---
 
-Run with:
+## 10. Testing
+
+Unit tests (`tests/unit/`) and integration tests (`tests/integration/`) run
+through Jest + Supertest against the backend.
+
 ```bash
 cd backend && npm test          # jest --coverage
 ```
+
+There is no automated frontend test suite at present — `npm run type-check`
+and `npm run lint` are the frontend's CI-equivalent checks.
 
 ---
 
@@ -1058,3 +1090,240 @@ documented trade-offs worth knowing before you touch the surrounding code):
   disagrees with `frontend/.env.example`'s default (`:3001`)**, which is
   also the backend's actual default port — always set this explicitly in
   your local `.env.local` rather than relying on either default.
+---
+
+## Appendix A: Full Database Schema (DDL)
+
+The complete, current `public` schema — this already includes the ticketing
+tables (`agents`, `tickets`, `ticket_events`), so it can be loaded as a
+single file into a fresh database rather than needing the base schema and
+the ticketing migration applied separately. Save this block as `schema.sql`
+and run `psql -d easybima -f schema.sql`.
+
+```sql
+-- public.analytics definition
+CREATE TABLE public.analytics (
+	id uuid DEFAULT uuid_generate_v4() NOT NULL,
+	session_id varchar(64) NOT NULL,
+	event_type varchar(50) NOT NULL,
+	event_data jsonb DEFAULT '{}'::jsonb NULL,
+	created_at timestamptz DEFAULT now() NULL,
+	CONSTRAINT chat_analytics_pkey PRIMARY KEY (id)
+);
+CREATE INDEX idx_analytics_event ON public.analytics USING btree (event_type);
+CREATE INDEX idx_analytics_session ON public.analytics USING btree (session_id);
+
+-- public.branches definition
+CREATE TABLE public.branches (
+	id uuid DEFAULT uuid_generate_v4() NOT NULL,
+	"name" varchar(200) NOT NULL,
+	city varchar(100) NOT NULL,
+	region varchar(100) NULL,
+	address text NULL,
+	phone varchar(100) NULL,
+	email varchar(100) NULL,
+	is_active bool DEFAULT true NULL,
+	keywords _text DEFAULT '{}'::text[] NOT NULL,
+	CONSTRAINT branches_pkey PRIMARY KEY (id)
+);
+CREATE INDEX idx_branches_city ON public.branches USING btree (city);
+
+-- public.claims definition
+CREATE TABLE public.claims (
+	id serial4 NOT NULL,
+	"name" text NOT NULL,
+	category text NOT NULL,
+	subcategory text NULL,
+	description text NOT NULL,
+	keywords _text DEFAULT '{}'::text[] NULL,
+	source_url text NULL,
+	is_active bool DEFAULT true NULL,
+	created_at timestamptz DEFAULT now() NULL,
+	updated_at timestamptz DEFAULT now() NULL,
+	CONSTRAINT claims_pkey PRIMARY KEY (id)
+);
+
+-- public.company_knowledge definition
+CREATE TABLE public.company_knowledge (
+	id uuid DEFAULT gen_random_uuid() NOT NULL,
+	"section" text NOT NULL,
+	title text NOT NULL,
+	"content" text NOT NULL,
+	tags _text DEFAULT '{}'::text[] NOT NULL,
+	is_active bool DEFAULT true NOT NULL,
+	created_at timestamptz DEFAULT now() NOT NULL,
+	updated_at timestamptz DEFAULT now() NOT NULL,
+	source_url text NULL,
+	CONSTRAINT company_knowledge_pkey PRIMARY KEY (id)
+);
+
+-- public.conversations definition
+CREATE TABLE public.conversations (
+	id uuid DEFAULT uuid_generate_v4() NOT NULL,
+	session_id varchar(64) NOT NULL,
+	messages jsonb DEFAULT '[]'::jsonb NOT NULL,
+	metadata jsonb DEFAULT '{}'::jsonb NULL,
+	created_at timestamptz DEFAULT now() NULL,
+	updated_at timestamptz DEFAULT now() NULL,
+	last_activity_at timestamptz DEFAULT now() NULL,
+	CONSTRAINT conversations_pkey PRIMARY KEY (id),
+	CONSTRAINT conversations_session_id_key UNIQUE (session_id)
+);
+CREATE INDEX idx_conversations_last_activity ON public.conversations USING btree (last_activity_at DESC);
+CREATE INDEX idx_conversations_session ON public.conversations USING btree (session_id);
+CREATE INDEX idx_conversations_updated ON public.conversations USING btree (updated_at);
+
+-- Table Triggers
+create trigger update_conversations_updated_at before
+update
+    on
+    public.conversations for each row execute function update_updated_at_column();
+create trigger update_last_activity_at before
+update
+    on
+    public.conversations for each row execute function update_last_activity_trigger();
+
+-- public.faq_entries definition
+CREATE TABLE public.faq_entries (
+	id uuid DEFAULT uuid_generate_v4() NOT NULL,
+	category varchar(100) NOT NULL,
+	question text NOT NULL,
+	answer text NOT NULL,
+	keywords _text DEFAULT '{}'::text[] NULL,
+	priority int4 DEFAULT 0 NULL,
+	is_active bool DEFAULT true NULL,
+	created_at timestamptz DEFAULT now() NULL,
+	updated_at timestamptz DEFAULT now() NULL,
+	source_url text NULL,
+	CONSTRAINT faq_entries_pkey PRIMARY KEY (id)
+);
+CREATE INDEX idx_faq_category ON public.faq_entries USING btree (category);
+CREATE INDEX idx_faq_keywords ON public.faq_entries USING gin (keywords);
+
+-- Table Triggers
+create trigger update_faq_updated_at before
+update
+    on
+    public.faq_entries for each row execute function update_updated_at_column();
+
+-- public.insurance_products definition
+CREATE TABLE public.insurance_products (
+	id serial4 NOT NULL,
+	"name" text NOT NULL,
+	category text NOT NULL,
+	sub_category text NULL,
+	description text NOT NULL,
+	benefits text NULL,
+	keywords _text DEFAULT '{}'::text[] NULL,
+	source_url text NULL,
+	is_active bool DEFAULT true NULL,
+	created_at timestamptz DEFAULT now() NULL,
+	updated_at timestamptz DEFAULT now() NULL,
+	CONSTRAINT insurance_products_pkey PRIMARY KEY (id)
+);
+
+-- public.agents definition
+CREATE TABLE public.agents (
+	id uuid DEFAULT uuid_generate_v4() NOT NULL,
+	staff_no varchar(50) NOT NULL,
+	full_name varchar(150) NOT NULL,
+	email varchar(150) NOT NULL,
+	department varchar(100) NULL,
+	branch_id uuid NULL,
+	"role" varchar(20) DEFAULT 'agent'::character varying NOT NULL,
+	is_active bool DEFAULT true NULL,
+	created_at timestamptz DEFAULT now() NULL,
+	password_hash text NOT NULL,
+	CONSTRAINT agents_email_key UNIQUE (email),
+	CONSTRAINT agents_pkey PRIMARY KEY (id),
+	CONSTRAINT agents_role_check CHECK (((role)::text = ANY ((ARRAY['agent'::character varying, 'supervisor'::character varying, 'admin'::character varying])::text[]))),
+	CONSTRAINT agents_staff_no_key UNIQUE (staff_no),
+	CONSTRAINT agents_branch_id_fkey FOREIGN KEY (branch_id) REFERENCES public.branches(id)
+);
+
+-- Table Triggers
+create trigger update_agents_updated_at before
+update
+    on
+    public.agents for each row execute function update_updated_at_column();
+
+-- public.messages definition
+CREATE TABLE public.messages (
+	id uuid DEFAULT uuid_generate_v4() NOT NULL,
+	session_id varchar(64) NOT NULL,
+	"role" varchar(20) NOT NULL,
+	"content" text NOT NULL,
+	metadata jsonb DEFAULT '{}'::jsonb NULL,
+	"timestamp" timestamptz DEFAULT now() NULL,
+	created_at timestamptz DEFAULT now() NOT NULL,
+	CONSTRAINT messages_pkey PRIMARY KEY (id),
+	CONSTRAINT messages_role_check CHECK (((role)::text = ANY ((ARRAY['user'::character varying, 'assistant'::character varying, 'system'::character varying, 'agent'::character varying])::text[]))),
+	CONSTRAINT messages_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.conversations(session_id) ON DELETE CASCADE
+);
+CREATE INDEX idx_messages_created ON public.messages USING btree ("timestamp");
+CREATE INDEX idx_messages_session ON public.messages USING btree (session_id);
+CREATE INDEX idx_messages_session_created ON public.messages USING btree (session_id, "timestamp");
+
+-- public.tickets definition
+CREATE TABLE public.tickets (
+	id uuid DEFAULT uuid_generate_v4() NOT NULL,
+	ticket_number varchar(20) NULL,
+	session_id varchar(64) NOT NULL,
+	channel varchar(20) NOT NULL,
+	customer_name varchar(150) NULL,
+	customer_phone varchar(30) NULL,
+	customer_email varchar(150) NULL,
+	category varchar(50) NULL,
+	subject text NOT NULL,
+	status public.ticket_status DEFAULT 'open'::ticket_status NOT NULL,
+	priority public.ticket_priority DEFAULT 'medium'::ticket_priority NOT NULL,
+	priority_score int4 DEFAULT 0 NOT NULL,
+	"source" varchar(30) NOT NULL,
+	assigned_to uuid NULL,
+	branch_id uuid NULL,
+	sla_due_at timestamptz NULL,
+	resolved_at timestamptz NULL,
+	transcript_snapshot jsonb DEFAULT '[]'::jsonb NULL,
+	metadata jsonb DEFAULT '{}'::jsonb NULL,
+	created_at timestamptz DEFAULT now() NOT NULL,
+	updated_at timestamptz DEFAULT now() NOT NULL,
+	human_handled bool DEFAULT false NOT NULL,
+	CONSTRAINT tickets_pkey PRIMARY KEY (id),
+	CONSTRAINT tickets_ticket_number_key UNIQUE (ticket_number),
+	CONSTRAINT tickets_assigned_to_fkey FOREIGN KEY (assigned_to) REFERENCES public.agents(id),
+	CONSTRAINT tickets_branch_id_fkey FOREIGN KEY (branch_id) REFERENCES public.branches(id),
+	CONSTRAINT tickets_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.conversations(session_id)
+);
+CREATE INDEX idx_tickets_session_handoff ON public.tickets USING btree (session_id, human_handled, status);
+
+-- Table Triggers
+create trigger set_tickets_ticket_number before
+insert
+    on
+    public.tickets for each row execute function set_ticket_number();
+create trigger update_tickets_updated_at before
+update
+    on
+    public.tickets for each row execute function update_updated_at_column();
+
+-- public.ticket_events definition
+CREATE TABLE public.ticket_events (
+	id uuid DEFAULT uuid_generate_v4() NOT NULL,
+	ticket_id uuid NOT NULL,
+	actor_type varchar(20) NOT NULL,
+	actor_id uuid NULL,
+	event_type varchar(30) NOT NULL,
+	event_data jsonb DEFAULT '{}'::jsonb NULL,
+	created_at timestamptz DEFAULT now() NOT NULL,
+	CONSTRAINT ticket_events_actor_type_check CHECK (((actor_type)::text = ANY ((ARRAY['system'::character varying, 'agent'::character varying, 'customer'::character varying])::text[]))),
+	CONSTRAINT ticket_events_pkey PRIMARY KEY (id),
+	CONSTRAINT ticket_events_actor_id_fkey FOREIGN KEY (actor_id) REFERENCES public.agents(id),
+	CONSTRAINT ticket_events_ticket_id_fkey FOREIGN KEY (ticket_id) REFERENCES public.tickets(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_ticket_events_ticket ON public.ticket_events USING btree (ticket_id, created_at);
+```
+
+> Note: `claims` and `insurance_products` use `serial4` (integer) primary
+> keys rather than UUIDs — inconsistent with the rest of the schema, but
+> left as-is here rather than "corrected," since changing a primary key
+> type is a breaking migration, not a documentation fix.
