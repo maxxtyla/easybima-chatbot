@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { handleChat, getConversationHistory, keepAliveSession, endSession, getTicketStatus, closeTicket, submitContactInfo } = require('../controllers/chatControllerV2');
+const { submitFeedback } = require('../controllers/feedbackController');
 const { validateInput } = require('../middleware/validateInput');
 
 /**
@@ -112,6 +113,25 @@ router.post('/ticket/close', closeTicket);
  * }
  */
 router.post('/contact-info', submitContactInfo);
+
+/**
+ * POST /api/chat/feedback
+ * Body: { sessionId, messageId, rating: 'up' | 'down' | null, messageContent?, messageRole? }
+ *
+ * 👍/👎 on a single bot reply, shown as a small hover affordance in
+ * MessageBubble. `rating: null` clears a previously-submitted rating
+ * (tapping the same thumb again undoes it). Upserts per (sessionId,
+ * messageId) — see feedbackService/the message_feedback migration for why.
+ *
+ * Response:
+ * {
+ *   success: boolean,
+ *   sessionId: string,
+ *   messageId: string,
+ *   rating: 'up' | 'down' | null
+ * }
+ */
+router.post('/feedback', submitFeedback);
 
 /**
  * GET /api/chat/health

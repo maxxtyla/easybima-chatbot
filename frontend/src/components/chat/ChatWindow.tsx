@@ -67,6 +67,7 @@ export function ChatWindow({
     skipContactInfo,
     isSubmittingContact,
     contactError,
+    rateMessage,
   } = chat
   const showQuickQuestions = messages.length === 0
 
@@ -123,7 +124,7 @@ export function ChatWindow({
             />
           )}
 
-          <MessageList messages={messages} isLoading={isLoading} onReply={handleReply} />
+          <MessageList messages={messages} isLoading={isLoading} onReply={handleReply} onRate={rateMessage} />
 
           {showQuickQuestions && <QuickQuestions questions={QUICK_QUESTIONS} onSelect={handleSendMessage} isLoading={isLoading} />}
 

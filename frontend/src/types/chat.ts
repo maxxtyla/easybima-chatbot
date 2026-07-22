@@ -20,6 +20,9 @@ export interface Message {
    *  snapshotted at the time the message arrived so the widget can show
    *  "Jane" instead of a generic "Live agent" label. */
   agentName?: string
+  /** The customer's current 👍/👎 rating on this reply, if any. Only
+   *  meaningful for role 'assistant'. undefined = not yet rated. */
+  feedback?: 'up' | 'down' | null
 }
 
 export interface ChatResponse {

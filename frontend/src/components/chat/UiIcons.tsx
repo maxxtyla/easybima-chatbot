@@ -63,6 +63,42 @@ export function XIcon({ className }: IconProps) {
   )
 }
 
+type ThumbIconProps = IconProps & { filled?: boolean }
+
+export function ThumbsUpIcon({ className, filled }: ThumbIconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className}
+      fill={filled ? 'currentColor' : 'none'}
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M7 11v9H4a1 1 0 01-1-1v-7a1 1 0 011-1h3zm0 0l4.5-7.5a1.5 1.5 0 012.6.2l.2.5a3 3 0 01.1 2l-.7 2.3H18a2 2 0 011.9 2.7l-2 6A2 2 0 0116 20H9.5a2.5 2.5 0 01-1.8-.8L7 18.2" />
+    </svg>
+  )
+}
+
+export function ThumbsDownIcon({ className, filled }: ThumbIconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className}
+      fill={filled ? 'currentColor' : 'none'}
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M17 13V4h3a1 1 0 011 1v7a1 1 0 01-1 1h-3zm0 0l-4.5 7.5a1.5 1.5 0 01-2.6-.2l-.2-.5a3 3 0 01-.1-2l.7-2.3H6a2 2 0 01-1.9-2.7l2-6A2 2 0 018 4h6.5a2.5 2.5 0 011.8.8l.7.8" />
+    </svg>
+  )
+}
+
 export function ChevronRightIcon({ className }: IconProps) {
   return (
     <svg {...base} className={className}>

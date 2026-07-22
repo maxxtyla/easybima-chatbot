@@ -11,6 +11,7 @@ interface MessageListProps {
   messages: Message[]
   isLoading: boolean
   onReply?: (message: Message) => void
+  onRate?: (messageId: string, rating: 'up' | 'down') => void
 }
 
 // How close to the bottom (in px) counts as "already there" — inside this
@@ -22,7 +23,7 @@ const NEAR_BOTTOM_THRESHOLD = 120
 // doesn't feel like the screen is being yanked around.
 const NUDGE_DISTANCE = 160
 
-export function MessageList({ messages, isLoading, onReply }: MessageListProps) {
+export function MessageList({ messages, isLoading, onReply, onRate }: MessageListProps) {
   const containerRef = React.useRef<HTMLDivElement>(null)
   const bottomRef = React.useRef<HTMLDivElement>(null)
   const prevCountRef = React.useRef(0)
@@ -122,7 +123,7 @@ export function MessageList({ messages, isLoading, onReply }: MessageListProps) 
         ) : (
           <>
             {messages.map((message) => (
-              <MessageBubble key={message.id} message={message} onReply={onReply} />
+              <MessageBubble key={message.id} message={message} onReply={onReply} onRate={onRate} />
             ))}
             {isLoading && (
               <div className="flex justify-start">

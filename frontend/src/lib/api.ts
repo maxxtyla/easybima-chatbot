@@ -53,6 +53,32 @@ export async function getConversationHistory(sessionId: string) {
   return response.json();
 }
 
+/**
+ * Submits (or clears, when rating is null) a 👍/👎 rating on a single bot
+ * reply. messageId is the client-generated Message.id already used for
+ * React keys/reply snippets — see MessageBubble's feedback buttons.
+ */
+export async function sendMessageFeedback(
+  sessionId: string,
+  messageId: string,
+  rating: 'up' | 'down' | null,
+  messageContent?: string
+) {
+  const response = await fetch(`${API_BASE}/chat/feedback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId, messageId, rating, messageContent }),
+  });
+
+  if (!response.ok) {
+    const error = new Error('Failed to submit feedback') as any;
+    error.status = response.status;
+    throw error;
+  }
+
+  return response.json();
+}
+
 export interface TicketStatusResponse {
   hasActiveTicket: boolean;
   ticketNumber: string | null;

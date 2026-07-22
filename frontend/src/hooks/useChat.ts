@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Message, ChatState, ReplySnippet, AssignedAgent, ContactInfo } from '@/types/chat';
 import { generateId } from '@/lib/utils';
-import { sendMessage, keepAliveSession, endSession, getConversationHistory, getTicketStatus, closeTicket as closeTicketApi, submitContactInfo as submitContactInfoApi } from '@/lib/api';
+import { sendMessage, keepAliveSession, endSession, getConversationHistory, getTicketStatus, closeTicket as closeTicketApi, submitContactInfo as submitContactInfoApi, sendMessageFeedback } from '@/lib/api';
 import { playNotificationSound } from '@/lib/notificationSound';
 
 const STORAGE_KEY = 'cic-chat-session';
@@ -552,6 +552,38 @@ export function useChat() {
     setState((prev) => ({ ...prev, awaitingContactInfo: false }));
   }, [state.sessionId]);
 
+  // 👍/👎 on a single bot reply. Tapping the currently-active rating again
+  // clears it (undo); tapping the other one switches it. Updates local
+  // state optimistically so the icon responds instantly, then persists to
+  // the backend — and rolls the optimistic update back if that fails, so
+  // the UI never shows a rating that didn't actually save.
+  const rateMessage = useCallback(
+    async (messageId: string, rating: 'up' | 'down') => {
+      if (!state.sessionId) return;
+      const target = state.messages.find((m) => m.id === messageId);
+      if (!target) return;
+
+      const previousRating = target.feedback ?? null;
+      const nextRating: 'up' | 'down' | null = previousRating === rating ? null : rating;
+
+      setState((prev) => ({
+        ...prev,
+        messages: prev.messages.map((m) => (m.id === messageId ? { ...m, feedback: nextRating } : m)),
+      }));
+
+      try {
+        await sendMessageFeedback(state.sessionId, messageId, nextRating, target.content);
+      } catch (error) {
+        console.error('Failed to submit message feedback:', error);
+        setState((prev) => ({
+          ...prev,
+          messages: prev.messages.map((m) => (m.id === messageId ? { ...m, feedback: previousRating } : m)),
+        }));
+      }
+    },
+    [state.sessionId, state.messages]
+  );
+
   return {
     ...state,
     addMessage,
@@ -565,5 +597,6 @@ export function useChat() {
     skipContactInfo,
     isSubmittingContact,
     contactError,
+    rateMessage,
   };
 }

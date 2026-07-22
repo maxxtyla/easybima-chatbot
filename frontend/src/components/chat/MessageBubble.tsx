@@ -3,18 +3,26 @@
 import React from 'react'
 import { Message } from '@/types/chat'
 import { MessageContent } from './MessageContent'
-import { ReplyIcon } from './UiIcons'
+import { ReplyIcon, ThumbsUpIcon, ThumbsDownIcon } from './UiIcons'
 import { formatTime, cn } from '@/lib/utils'
 
 interface MessageBubbleProps {
   message: Message
   onReply?: (message: Message) => void
+  /** Persists a 👍/👎 on this reply. Tapping the active rating again
+   *  clears it — see useChat's rateMessage. Only rendered for bot
+   *  ('assistant') replies. */
+  onRate?: (messageId: string, rating: 'up' | 'down') => void
 }
 
-export function MessageBubble({ message, onReply }: MessageBubbleProps) {
+export function MessageBubble({ message, onReply, onRate }: MessageBubbleProps) {
   const isUser = message.role === 'user'
   const isAgent = message.role === 'agent'
   const isSystem = message.role === 'system'
+  // Feedback is scoped to bot replies — rating a live agent's message or
+  // the customer's own message doesn't fit the "catch silent bot
+  // failures" purpose of this feature.
+  const isBotReply = message.role === 'assistant'
 
   return (
     <div
@@ -94,14 +102,56 @@ export function MessageBubble({ message, onReply }: MessageBubbleProps) {
         */}
         <MessageContent content={message.content} isUser={isUser} isSystem={isSystem} />
 
-        <span
-          className={cn(
-            'text-xs mt-1.5 block',
-            isUser ? 'text-red-200 text-right' : isSystem ? 'text-blue-600 text-center' : 'text-neutral-400'
+        <div className={cn('flex items-center mt-1.5', isBotReply ? 'justify-between' : '')}>
+          <span
+            className={cn(
+              'text-xs block',
+              isUser ? 'text-red-200 text-right w-full' : isSystem ? 'text-blue-600 text-center w-full' : 'text-neutral-400'
+            )}
+          >
+            {formatTime(message.timestamp)}
+          </span>
+
+          {isBotReply && onRate && (
+            <div
+              className={cn(
+                'flex items-center gap-0.5 -mr-1 transition-opacity',
+                // Once rated, keep the icon visible as confirmation instead
+                // of fading it back out on mouse-leave.
+                message.feedback ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100'
+              )}
+            >
+              <button
+                type="button"
+                onClick={() => onRate(message.id, 'up')}
+                aria-label={message.feedback === 'up' ? 'Remove helpful rating' : 'Mark this reply as helpful'}
+                aria-pressed={message.feedback === 'up'}
+                className={cn(
+                  'w-6 h-6 rounded-full flex items-center justify-center transition-colors',
+                  message.feedback === 'up'
+                    ? 'text-emerald-600'
+                    : 'text-neutral-400 hover:text-emerald-600 hover:bg-emerald-50'
+                )}
+              >
+                <ThumbsUpIcon className="w-3.5 h-3.5" filled={message.feedback === 'up'} />
+              </button>
+              <button
+                type="button"
+                onClick={() => onRate(message.id, 'down')}
+                aria-label={message.feedback === 'down' ? 'Remove not helpful rating' : 'Mark this reply as not helpful'}
+                aria-pressed={message.feedback === 'down'}
+                className={cn(
+                  'w-6 h-6 rounded-full flex items-center justify-center transition-colors',
+                  message.feedback === 'down'
+                    ? 'text-cic-red'
+                    : 'text-neutral-400 hover:text-cic-red hover:bg-red-50'
+                )}
+              >
+                <ThumbsDownIcon className="w-3.5 h-3.5" filled={message.feedback === 'down'} />
+              </button>
+            </div>
           )}
-        >
-          {formatTime(message.timestamp)}
-        </span>
+        </div>
       </div>
 
       {!isSystem && !isUser && onReply && (
