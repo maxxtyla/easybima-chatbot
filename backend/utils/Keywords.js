@@ -4,6 +4,13 @@
 // tables are worth querying in the first place). Kept in one place so the
 // two never drift out of sync.
 //
+// NOTE: this file used to live at utils/Keywords.js (capital K). Every
+// require() in the codebase already imports it as lowercase
+// ('../utils/keywords'), which only resolved because dev machines run a
+// case-insensitive filesystem (macOS/Windows). On a case-sensitive Linux
+// prod box this throws MODULE_NOT_FOUND. Renamed to match the requires
+// exactly — same fix applied to IntentRouter.js -> intentRouter.js.
+//
 
 const STOP_WORDS = new Set([
   'the','and','for','are','but','not','you','all','any','can','her','was',

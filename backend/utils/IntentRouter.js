@@ -1,95 +1,120 @@
 //
-// intentRouter — decides WHICH tables in the schema are worth querying for
-// a given user message, instead of hitting every RAG table on every turn.
+// intentRouter — HYBRID Dialogflow-inspired intent classifier.
 //
-// Tables covered (see schema.sql):
-//   - faq_entries          -> wantsFAQ
-//   - insurance_products   -> wantsProducts
-//   - branches             -> wantsBranches
-//   - company_knowledge    -> wantsCompanyInfo
-//   - claims               -> wantsClaims
+// Decides which tables in the schema are worth querying for a given user
+// message (see schema.sql): faq_entries, insurance_products, branches,
+// company_knowledge, claims. `analytics`, `conversations`, and `messages`
+// are never part of retrieval routing — logging/history tables, handled by
+// conversationService.js.
 //
-// `analytics`, `conversations`, and `messages` are never part of retrieval
-// routing — they're logging/history tables, not RAG sources, and are
-// handled separately by conversationService.js.
+// ── Why "hybrid" and not just Dialogflow, and not just local keywords ──────
 //
-// This is intentionally simple keyword matching (fast, no extra LLM call,
-// no added latency) rather than an ML classifier — good enough because the
+// Researched Dialogflow ES/CX before building this. Its core ideas are
+// genuinely good and worth stealing: named Intents, weighted Training
+// Phrases, typed Entities, a Default Fallback Intent, a confidence
+// threshold (0.3 by default), and Contexts that bias short follow-up
+// messages toward the previous turn's topic. All five of those concepts
+// are reimplemented below, running in-process, with zero required network
+// calls — because two things rule out relying on the live Dialogflow API
+// as the ONLY source of truth:
+//
+//   1. Dialogflow has no Swahili/Sheng support. Kenyan customers code-switch
+//      constantly ("naeza pata cover gani for gari yangu") — a router that
+//      can't parse that is a regression, not an upgrade, for a big chunk
+//      of real traffic.
+//   2. This router's job is narrow: pick which Postgres tables to query for
+//      RAG context. Claude is still the actual conversational NLU. Adding
+//      a hard external dependency (GCP project, service account, network
+//      round trip, $/session on CX) for a pre-filter is a lot of surface
+//      area for a task this codebase already does at zero added latency.
+//
+// So the LOCAL scored classifier below is always authoritative — it now
+// also covers claims and company_knowledge with live DB-driven term caches
+// (previously only products/branches/FAQ had that; claims/company relied
+// on static lists only — closed here). Dialogflow (services/dialogflowService.js)
+// is an OPTIONAL layer: if DIALOGFLOW_ENABLED=true and it responds inside
+// its timeout with a confident, mapped intent, its result is merged in as
+// an extra scoring boost and a cleaner entity (e.g. city) extraction. If
+// it's disabled, slow, wrong-mapped, low-confidence, or errors — which
+// includes every Sheng/Swahili message, since the agent's language is
+// English — the local classifier's own result stands completely on its
+// own. Nothing breaks if Dialogflow is never configured at all.
+//
+// This is intentionally NOT an ML classifier — good enough because the
 // domain vocabulary (branches/offices vs. products/cover vs. claims/renew
-// vs. about/history) barely overlaps.
+// vs. about/history) barely overlaps, same reasoning as the original file.
 //
 
 const { extractKeywords } = require('./keywords');
 const { query } = require('../config/database');
-const { RAG_CACHE } = require('../config/constants');
+const { RAG_CACHE, INTENT_ROUTER } = require('../config/constants');
+const { detectDialogflowIntent } = require('../services/dialogflowService');
 
-const BRANCH_KEYWORDS = [
+// ---------------------------------------------------------------------------
+// Static "training phrases" — the Dialogflow-equivalent of hand-curated
+// example utterances. Kept from the original file (this is real curated
+// domain vocabulary — nicknames, Swahili terms, product slang) but
+// deduped automatically via Set rather than retyped, since the original
+// array had ~50 accidental duplicate entries.
+// ---------------------------------------------------------------------------
+const BRANCH_PHRASES = dedupe([
   'branch', 'branches', 'office', 'location', 'near me', 'find', 'where',
   'visit', 'address', 'directions', 'contact', 'phone number', 'email address',
-];
+]);
 
-const PRODUCT_KEYWORDS = [
-  'product', 'products', 'cover', 'coverage', 'insure', 'insurance', 'policy','haba','haba na haba',
+const PRODUCT_PHRASES = dedupe([
+  'product', 'products', 'cover', 'coverage', 'insure', 'insurance', 'policy', 'haba', 'haba na haba',
   'plan', 'benefit', 'benefits', 'offer', 'motor', 'car insurance', 'health',
-  'medisure','family','health','medical','inpatient','outpatient','hospital','diagnostics','chemotherapy','surgery','dependants',
-  'group','personal accident','funeral','death','children','adults','group cover', 'benefit',
+  'medisure', 'family', 'health', 'medical', 'inpatient', 'outpatient', 'hospital', 'diagnostics', 'chemotherapy', 'surgery', 'dependants',
+  'group', 'personal accident', 'funeral', 'death', 'children', 'adults', 'group cover', 'benefit',
   'medical', 'life insurance', 'travel insurance', 'marine', 'wiba',
-  'SME','medipack','small business','health','medical','inpatient','outpatient','maternity','dental','optical','group medical','employees','sme',
-  'WIBA','work injury','employees','bodily injury','occupational disease','employer','workplace','work injury benefits act','work injury benefits','workers compensation','workers comp','workers compensation insurance',
+  'SME', 'medipack', 'small business', 'health', 'medical', 'inpatient', 'outpatient', 'maternity', 'dental', 'optical', 'group medical', 'employees', 'sme',
+  'WIBA', 'work injury', 'employees', 'bodily injury', 'occupational disease', 'employer', 'workplace', 'work injury benefits act', 'work injury benefits', 'workers compensation', 'workers comp', 'workers compensation insurance',
   'indemnity', 'liability', 'malpractice', 'negligence', 'errors', 'omissions', 'lawyer', 'doctor', 'engineer', 'consultant', 'professional',
   'personal accident', 'education policy', 'pension', 'quote', 'premium',
-  'fixed income','fixed money','fixed',
-  'Dollar','$','usa','United states Dollar',
+  'fixed income', 'fixed money', 'fixed',
+  'Dollar', '$', 'usa', 'United states Dollar',
   'Wealth fund',
-  'invest','MMF','mmf','moneymarket','moneymarketfund','money','moneyfund','money market fund','money market','money market fund','money market funds','money market investment','money market investments',
+  'invest', 'MMF', 'mmf', 'moneymarket', 'moneymarketfund', 'money', 'moneyfund', 'money market fund', 'money market', 'money market funds', 'money market investment', 'money market investments',
   'afya bora', 'affordable', 'family', 'health', 'inpatient', 'outpatient', 'children', 'parents', 'low cost', 'basic cover', '32000',
-  'micro','jilinde','micro enterprise','SME','bodily injury','employees','workplace',
+  'micro', 'jilinde', 'micro enterprise', 'SME', 'bodily injury', 'employees', 'workplace',
   'personal accident', 'injury', 'disability', 'death', 'medical expenses', 'funeral expenses', 'accident', 'died',
-  'golfer','sportsman','sports','athlete','accident','disability','career',
-  'domestic','home','house','property','buildings','contents','household','liability','domestic servant',
-  'student','personal accident','injury','disability','death','medical expenses','funeral','school',
-  'travel','holiday','trip','baggage','flight cancellation','medical','fly','abroad','tourist',
+  'golfer', 'sportsman', 'sports', 'athlete', 'accident', 'disability', 'career',
+  'domestic', 'home', 'house', 'property', 'buildings', 'contents', 'household', 'liability', 'domestic servant',
+  'student', 'personal accident', 'injury', 'disability', 'death', 'medical expenses', 'funeral', 'school',
+  'travel', 'holiday', 'trip', 'baggage', 'flight cancellation', 'medical', 'fly', 'abroad', 'tourist',
   'what do you', 'buy', 'purchase', 'sign up', 'get covered', 'recommend',
-  'seniors','mediplan','elderly',"old age",'senior citizen','health','medical','60 years','80 years','geriatric','chronic','dental','optical',
+  'seniors', 'mediplan', 'elderly', 'old age', 'senior citizen', 'health', 'medical', '60 years', '80 years', 'geriatric', 'chronic', 'dental', 'optical',
   'private motor', 'monthly', 'vehicle', 'motor insurance', 'easy bima', 'installment',
-  'cargo','transit','goods','merchandise','sea','air','rail','road','ICC-A','import','export','shipping',
-  'commercial','vehicle','third party','bodily injury','property damage','driver','passengers','car','road',
-  'student','personal accident','bodily injury','work insurance','accidental','violent','industry attachment insurance',
+  'cargo', 'transit', 'goods', 'merchandise', 'sea', 'air', 'rail', 'road', 'ICC-A', 'import', 'export', 'shipping',
+  'commercial', 'vehicle', 'third party', 'bodily injury', 'property damage', 'driver', 'passengers', 'car', 'road',
+  'student', 'personal accident', 'bodily injury', 'work insurance', 'accidental', 'violent', 'industry attachment insurance',
   'saving', 'savings', 'save', 'savings plan', 'savings account', 'savings product',
   'education savings', 'child savings', 'goal savings', 'savings and investment',
-  'endowment', 'endowment policy', 'retirement savings', 'save money', 'saving plan','mobile savings','life cover','cover','akiba','akiba smart','jilinde',
-  'investment protection','protection','academia','academia policy' ,'invest plan','smart saver','bulgary','theft','thieves','stolen','stole',
-  'funeral expense','medisure','grouplife','group life','loan guard','afya bora','seniors','SME','sme','medipack'
-];
+  'endowment', 'endowment policy', 'retirement savings', 'save money', 'saving plan', 'mobile savings', 'life cover', 'cover', 'akiba', 'akiba smart', 'jilinde',
+  'investment protection', 'protection', 'academia', 'academia policy', 'invest plan', 'smart saver', 'bulgary', 'theft', 'thieves', 'stolen', 'stole',
+  'funeral expense', 'medisure', 'grouplife', 'group life', 'loan guard', 'afya bora', 'seniors', 'SME', 'sme', 'medipack',
+]);
 
-const COMPANY_KEYWORDS = [
+const COMPANY_PHRASES = dedupe([
   'about', 'history', 'company', 'group', 'mission', 'vision',
-  'founded', 'when was', 'leadership', 'ceo', 'chairman', 'subsidiary', 'company', 'history', 'overview',
+  'founded', 'when was', 'leadership', 'ceo', 'chairman', 'subsidiary', 'history', 'overview',
   'subsidiaries', 'sustainability', 'careers', 'annual report', 'who are you',
-  'X','twitter','social media','socialmedia','online platforms','linked in',
-  'youtube','instagram','facebook',
+  'X', 'twitter', 'social media', 'socialmedia', 'online platforms', 'linked in',
+  'youtube', 'instagram', 'facebook',
   'job', 'opportunity', 'career', 'work', 'intern', 'jobs', 'hiring', 'new employees',
-  'abroad branches', 'subsidiaries', 'outside kenya', 'malawi', 'uganda', 'ug', 'ke', 's.sudan', 'south sudan', 'diaspora',
-  'who is cic', 'staff', 'directors', 'leaders', 'leadership Team', 'organization structure', 'CEO', 'managing directors'
-];
+  'abroad branches', 'outside kenya', 'malawi', 'uganda', 'ug', 'ke', 's.sudan', 'south sudan', 'diaspora',
+  'who is cic', 'staff', 'directors', 'leaders', 'leadership team', 'organization structure', 'managing directors',
+]);
 
-// FAQ is the general support/process table: , renewals, cancellations,
-// payments, complaints, "how do I..." questions. It's also the safe default
-// fallback when nothing else matches (see below).
-const FAQ_KEYWORDS = [
+const FAQ_PHRASES = dedupe([
   'how do i', 'how to', 'renew', 'renewal', 'cancel',
   'cancellation', 'pay', 'payment', 'refund', 'complaint', 'complain',
   'document', 'documents', 'requirements', 'steps', 'apply',
   'application', 'help', 'faq', 'question',
-];
+]);
 
-// CLAIMS is its own dedicated table (schema: claims) covering anything
-// claim-specific — filing, tracking, requirements, documents, payouts, etc.
-// This is intentionally exclusive of FAQ/company_knowledge: if someone is
-// asking about a claim, the claims table is the authoritative source and
-// we don't want the LLM's context diluted/contradicted by generic FAQ or
-// company-knowledge rows that happen to also mention the word "claim".
-const CLAIMS_KEYWORDS = [
+const CLAIMS_PHRASES = dedupe([
   'claim', 'claims', 'file a claim', 'lodge a claim', 'make a claim',
   'report a claim', 'submit a claim', 'raise a claim', 'open a claim',
   'claim status', 'track my claim', 'track claim', 'claim tracking',
@@ -101,271 +126,415 @@ const CLAIMS_KEYWORDS = [
   'claim rejected', 'claim denied', 'claim approved', 'claim delay',
   'assessor', 'loss adjuster', 'excess', 'claim excess', 'accident report',
   'police abstract', 'garage', 'towing', 'writeoff', 'write-off',
-];
-
-function matchesAny(lowerMsg, keywordList) {
-  return keywordList.some(kw => lowerMsg.includes(kw));
-}
-
-// ---------------------------------------------------------------------------
-// Known branch locations — pulled from branches.city / branches.region /
-// branches.keywords so that mentioning a place name alone ("accident in
-// Bungoma") triggers branch retrieval, even without a generic word like
-// "branch" or "office" in the message. BRANCH_KEYWORDS above stays as the
-// static fallback for phrasing like "where can I find you".
-//
-// Cached in memory (5 min TTL) since this list barely changes and we don't
-// want a DB round trip on every single message.
-// ---------------------------------------------------------------------------
-const LOCATION_CACHE_TTL_MS = RAG_CACHE.LOCATION_TTL_MS;
-let locationCache = null; // Set<string>
-let locationCacheExpiry = 0;
-
-async function getKnownLocationTerms() {
-  const now = Date.now();
-  if (locationCache && now < locationCacheExpiry) {
-    return locationCache;
-  }
-
-  try {
-    const result = await query(
-      `SELECT city, region, keywords FROM branches WHERE is_active = true`
-    );
-
-    const terms = new Set();
-    for (const row of result.rows) {
-      if (row.city) terms.add(row.city.toLowerCase());
-      if (row.region) terms.add(row.region.toLowerCase());
-      (row.keywords || []).forEach(kw => {
-        if (kw) terms.add(kw.toLowerCase());
-      });
-    }
-
-    locationCache = terms;
-    locationCacheExpiry = now + LOCATION_CACHE_TTL_MS;
-    return terms;
-  } catch (err) {
-    console.error('[IntentRouter] Failed to load branch locations, falling back to static keywords only:', err.message);
-    // Don't cache the failure — retry next call — but return an empty set
-    // for this call so classifyIntent still works off BRANCH_KEYWORDS alone.
-    return locationCache || new Set();
-  }
-}
-
-// Generic "does this message contain any known term from this set" check —
-// shared by branch-location matching and product matching below, so both
-// stay grounded in real DB values instead of a static guess-list.
-function matchesKnownTerm(lowerMsg, termSet) {
-  for (const term of termSet) {
-    // Skip 1-2 char terms (e.g. stray short tags) to avoid noisy false positives
-    if (term.length > 2 && lowerMsg.includes(term)) return term;
-  }
-  return null;
-}
-
-// Back-compat alias — kept so any other caller of the old name still works.
-const matchesLocation = matchesKnownTerm;
-
-// ---------------------------------------------------------------------------
-// Known product terms — pulled from insurance_products.name (word-split) and
-// insurance_products.keywords, so that mentioning an actual product/service
-// by name ("cic pharmacy", "haba haba") triggers product retrieval even when
-// the static PRODUCT_KEYWORDS list has no idea that term exists. This is the
-// same pattern as getKnownLocationTerms() for branches — a hand-maintained
-// keyword list will always lag behind the real catalog; matching against
-// live DB values doesn't.
-//
-// A handful of generic words that show up in almost every product name
-// ("cic", "plan", "cover", "policy", "insurance") are excluded so they don't
-// blanket-match every message the way "branch" used to for branches.
-// ---------------------------------------------------------------------------
-const PRODUCT_TERM_NOISE = new Set([
-  'cic', 'plan', 'cover', 'policy', 'insurance', 'product', 'group',
-  'and', 'the', 'for', 'with', 'our', 'your',
 ]);
 
-const FAQ_CACHE_TTL_MS = RAG_CACHE.FAQ_TERM_TTL_MS;
-let faqTermCache = null; // Set<string>
-let faqTermCacheExpiry = 0;
+// A handful of generic words that show up in almost every product/company
+// row and would otherwise blanket-match every message — excluded from ALL
+// dynamic (DB-driven) term sets, not just products, for consistency.
+const TERM_NOISE = new Set([
+  'cic', 'plan', 'cover', 'policy', 'insurance', 'product', 'products', 'group',
+  'and', 'the', 'for', 'with', 'our', 'your', 'company',
+]);
 
-// Known FAQ terms — pulled ONLY from faq_entries.keywords (curated), not
-// question/answer text. Question text is long, natural-language prose;
-// splitting it into terms would just rebuild a noisy, uncontrolled version
-// of FAQ_KEYWORDS. keywords[] is deliberately curated per-row, so it's a
-// clean, high-signal source the same way insurance_products.keywords is.
-async function getKnownFAQTerms() {
-  const now = Date.now();
-  if (faqTermCache && now < faqTermCacheExpiry) {
-    return faqTermCache;
-  }
-
-  try {
-    const result = await query(
-      `SELECT keywords FROM faq_entries WHERE is_active = true`
-    );
-
-    const terms = new Set();
-    for (const row of result.rows) {
-      (row.keywords || []).forEach(kw => {
-        const clean = (kw || '').toLowerCase().trim();
-        if (clean && clean.length > 2 && !PRODUCT_TERM_NOISE.has(clean)) terms.add(clean);
-      });
-    }
-
-    faqTermCache = terms;
-    faqTermCacheExpiry = now + FAQ_CACHE_TTL_MS;
-    return terms;
-  } catch (err) {
-    console.error('[IntentRouter] Failed to load FAQ terms, falling back to static keywords only:', err.message);
-    return faqTermCache || new Set();
-  }
+function dedupe(arr) {
+  return Array.from(new Set(arr.map(s => s.toLowerCase())));
 }
 
-const PRODUCT_CACHE_TTL_MS = RAG_CACHE.PRODUCT_TERM_TTL_MS;
-let productTermCache = null; // Set<string>
-let productTermCacheExpiry = 0;
-
-async function getKnownProductTerms() {
-  const now = Date.now();
-  if (productTermCache && now < productTermCacheExpiry) {
-    return productTermCache;
-  }
-
-  try {
-    const result = await query(
-      `SELECT name, keywords FROM insurance_products WHERE is_active = true`
-    );
-
-    const terms = new Set();
-    for (const row of result.rows) {
-      if (row.name) {
-        row.name
-          .toLowerCase()
-          .split(/\W+/)
-          .filter(w => w.length > 2 && !PRODUCT_TERM_NOISE.has(w))
-          .forEach(w => terms.add(w));
-      }
-      (row.keywords || []).forEach(kw => {
-        const clean = (kw || '').toLowerCase().trim();
-        if (clean && !PRODUCT_TERM_NOISE.has(clean)) terms.add(clean);
-      });
+// ---------------------------------------------------------------------------
+// Scoring — replaces the old boolean "does any keyword substring appear"
+// with a weighted raw score, later squashed into a 0-1 confidence value.
+// Multi-word static phrases and DB-curated dynamic terms both count for
+// more than a single generic word — see INTENT_ROUTER weights for why.
+// ---------------------------------------------------------------------------
+function staticPhraseScore(lowerMsg, phrases) {
+  let raw = 0;
+  for (const phrase of phrases) {
+    if (lowerMsg.includes(phrase)) {
+      raw += phrase.includes(' ')
+        ? INTENT_ROUTER.STATIC_PHRASE_WEIGHT_MULTI
+        : INTENT_ROUTER.STATIC_PHRASE_WEIGHT_SINGLE;
     }
-
-    productTermCache = terms;
-    productTermCacheExpiry = now + PRODUCT_CACHE_TTL_MS;
-    return terms;
-  } catch (err) {
-    console.error('[IntentRouter] Failed to load product terms, falling back to static keywords only:', err.message);
-    return productTermCache || new Set();
   }
+  return raw;
+}
+
+// Generic "does this message contain any known term from this set" check,
+// shared by every dynamic (DB-driven) term source below. Returns the full
+// list of matched terms (not just the first) so scoring reflects how many
+// distinct DB-curated terms actually hit, and the first match doubles as
+// the entity value (e.g. cityHint) where relevant.
+function matchDynamicTerms(lowerMsg, termSet) {
+  const matches = [];
+  for (const term of termSet) {
+    // Skip 1-2 char terms (stray short tags) to avoid noisy false positives.
+    if (term.length > 2 && lowerMsg.includes(term)) matches.push(term);
+  }
+  return matches;
+}
+
+function dynamicTermScore(matches) {
+  return matches.length * INTENT_ROUTER.DYNAMIC_TERM_WEIGHT;
+}
+
+// confidence = raw / (raw + K) — see INTENT_ROUTER.SOFTEN_K for the reasoning.
+function toConfidence(raw) {
+  return raw / (raw + INTENT_ROUTER.SOFTEN_K);
+}
+
+// ---------------------------------------------------------------------------
+// Dynamic (DB-driven) term caches — one small factory instead of five
+// copy-pasted cache blocks. Each entry is { label, ttlMs, load() } where
+// load() runs the actual query and returns a Set<string> of lowercase terms.
+// Cached in memory since these barely change and we don't want a DB round
+// trip on every single message.
+// ---------------------------------------------------------------------------
+function createTermCache(label, ttlMs, load) {
+  let cache = null;
+  let expiry = 0;
+
+  return async function getTerms() {
+    const now = Date.now();
+    if (cache && now < expiry) return cache;
+
+    try {
+      const terms = await load();
+      cache = terms;
+      expiry = now + ttlMs;
+      return terms;
+    } catch (err) {
+      console.error(`[IntentRouter] Failed to load ${label} terms, falling back to static phrases only:`, err.message);
+      // Don't cache the failure — retry next call — but return whatever we
+      // had (possibly empty) so classifyIntent still works off static
+      // phrases alone.
+      return cache || new Set();
+    }
+  };
+}
+
+const getLocationTerms = createTermCache('branch location', RAG_CACHE.LOCATION_TTL_MS, async () => {
+  const result = await query(`SELECT city, region, keywords FROM branches WHERE is_active = true`);
+  const terms = new Set();
+  for (const row of result.rows) {
+    if (row.city) terms.add(row.city.toLowerCase());
+    if (row.region) terms.add(row.region.toLowerCase());
+    (row.keywords || []).forEach(kw => { if (kw) terms.add(kw.toLowerCase()); });
+  }
+  return terms;
+});
+
+const getProductTerms = createTermCache('product', RAG_CACHE.PRODUCT_TERM_TTL_MS, async () => {
+  const result = await query(`SELECT name, keywords FROM insurance_products WHERE is_active = true`);
+  const terms = new Set();
+  for (const row of result.rows) {
+    if (row.name) {
+      row.name.toLowerCase().split(/\W+/)
+        .filter(w => w.length > 2 && !TERM_NOISE.has(w))
+        .forEach(w => terms.add(w));
+    }
+    (row.keywords || []).forEach(kw => {
+      const clean = (kw || '').toLowerCase().trim();
+      if (clean && !TERM_NOISE.has(clean)) terms.add(clean);
+    });
+  }
+  return terms;
+});
+
+const getFAQTerms = createTermCache('FAQ', RAG_CACHE.FAQ_TERM_TTL_MS, async () => {
+  // Only faq_entries.keywords (curated), not question/answer prose —
+  // splitting long natural-language text into terms would just rebuild a
+  // noisy, uncontrolled version of FAQ_PHRASES.
+  const result = await query(`SELECT keywords FROM faq_entries WHERE is_active = true`);
+  const terms = new Set();
+  for (const row of result.rows) {
+    (row.keywords || []).forEach(kw => {
+      const clean = (kw || '').toLowerCase().trim();
+      if (clean && clean.length > 2 && !TERM_NOISE.has(clean)) terms.add(clean);
+    });
+  }
+  return terms;
+});
+
+// NEW — claims.keywords was previously unused by the router (claims relied
+// entirely on the static CLAIMS_PHRASES list above). Same pattern as
+// products/branches/FAQ, closing that gap.
+const getClaimsTerms = createTermCache('claims', RAG_CACHE.CLAIMS_TERM_TTL_MS, async () => {
+  const result = await query(`SELECT name, category, subcategory, keywords FROM claims WHERE is_active = true`);
+  const terms = new Set();
+  for (const row of result.rows) {
+    [row.name, row.category, row.subcategory].forEach(field => {
+      if (!field) return;
+      field.toLowerCase().split(/\W+/)
+        .filter(w => w.length > 2 && !TERM_NOISE.has(w))
+        .forEach(w => terms.add(w));
+    });
+    (row.keywords || []).forEach(kw => {
+      const clean = (kw || '').toLowerCase().trim();
+      if (clean && clean.length > 2 && !TERM_NOISE.has(clean)) terms.add(clean);
+    });
+  }
+  return terms;
+});
+
+// NEW — company_knowledge.tags was previously unused by the router (static
+// COMPANY_PHRASES list only). Same pattern, closing the second gap.
+const getCompanyTerms = createTermCache('company knowledge', RAG_CACHE.COMPANY_TERM_TTL_MS, async () => {
+  const result = await query(`SELECT section, title, tags FROM company_knowledge WHERE is_active = true`);
+  const terms = new Set();
+  for (const row of result.rows) {
+    [row.section, row.title].forEach(field => {
+      if (!field) return;
+      field.toLowerCase().split(/\W+/)
+        .filter(w => w.length > 2 && !TERM_NOISE.has(w))
+        .forEach(w => terms.add(w));
+    });
+    (row.tags || []).forEach(tag => {
+      const clean = (tag || '').toLowerCase().trim();
+      if (clean && clean.length > 2 && !TERM_NOISE.has(clean)) terms.add(clean);
+    });
+  }
+  return terms;
+});
+
+// ---------------------------------------------------------------------------
+// Intent registry — the local equivalent of a Dialogflow agent export.
+// Declarative: name, static phrases, dynamic (DB) term source, priority
+// (for tie-break suppression), and which lower-priority intents it
+// suppresses when it wins. This replaces the two hardcoded if-blocks the
+// original file used for the claims-override and product-override cases —
+// adding a 6th table later means adding a registry entry, not new branches.
+// ---------------------------------------------------------------------------
+const INTENTS = [
+  {
+    key: 'claims',
+    phrases: CLAIMS_PHRASES,
+    dynamicTerms: getClaimsTerms,
+    priority: 5, // highest — a claims-table match is the authoritative source for anything claim-shaped
+    suppresses: ['faq', 'company'], // don't dilute/contradict claims data with generic FAQ/company rows
+  },
+  {
+    key: 'products',
+    phrases: PRODUCT_PHRASES,
+    dynamicTerms: getProductTerms,
+    priority: 4,
+    suppresses: ['company'], // a named product match shouldn't also pull unrelated company_knowledge rows
+  },
+  {
+    key: 'branches',
+    phrases: BRANCH_PHRASES,
+    dynamicTerms: getLocationTerms,
+    priority: 3,
+    entity: 'location',
+  },
+  {
+    key: 'company',
+    phrases: COMPANY_PHRASES,
+    dynamicTerms: getCompanyTerms,
+    priority: 2,
+  },
+  {
+    key: 'faq',
+    phrases: FAQ_PHRASES,
+    dynamicTerms: getFAQTerms,
+    priority: 1, // lowest — FAQ is the general/support catch-all
+  },
+];
+
+// ---------------------------------------------------------------------------
+// scoreIntents — runs the local weighted match for every registered intent.
+// Always runs, regardless of whether Dialogflow is configured — this is the
+// authoritative layer described in the file header.
+// ---------------------------------------------------------------------------
+async function scoreIntents(lowerMsg) {
+  const scores = {};
+
+  for (const intent of INTENTS) {
+    const staticRaw = staticPhraseScore(lowerMsg, intent.phrases);
+    const termSet = await intent.dynamicTerms();
+    const dynamicMatches = matchDynamicTerms(lowerMsg, termSet);
+    const raw = staticRaw + dynamicTermScore(dynamicMatches);
+
+    scores[intent.key] = {
+      raw,
+      confidence: toConfidence(raw),
+      matchedTerm: dynamicMatches[0] || null,
+    };
+  }
+
+  return scores;
+}
+
+// ---------------------------------------------------------------------------
+// applyDialogflowBoost — merges an (optional) Dialogflow result into the
+// local scores. Dialogflow doesn't get to unilaterally decide an intent;
+// it can only push a local score up (bounded at 1.0) and, when the intent
+// it matched has zero local signal at all, register a floor confidence so
+// a Dialogflow-only match (e.g. a cleverly-phrased English sentence with no
+// keyword overlap) still clears the threshold.
+// ---------------------------------------------------------------------------
+function applyDialogflowBoost(scores, dfResult) {
+  if (!dfResult) return { scores, cityHintFromDF: null };
+
+  const { intentKey, confidence, cityHint } = dfResult;
+  const existing = scores[intentKey];
+  if (existing) {
+    existing.confidence = Math.max(existing.confidence, confidence);
+    existing.dialogflowMatched = true;
+  }
+
+  return { scores, cityHintFromDF: cityHint || null };
+}
+
+// ---------------------------------------------------------------------------
+// applyPrioritySuppression — sorts intents by confidence, then lets the
+// highest-scoring winner suppress whatever lower-priority intents it
+// declares in `suppresses` (generalizes the old hardcoded claims/product
+// overrides into config).
+// ---------------------------------------------------------------------------
+function applyPrioritySuppression(wants, scores) {
+  const ranked = [...INTENTS].sort((a, b) => scores[b.key].confidence - scores[a.key].confidence);
+
+  for (const intent of ranked) {
+    if (!wants[intent.key] || !intent.suppresses) continue;
+    for (const suppressedKey of intent.suppresses) {
+      if (wants[suppressedKey]) {
+        console.log(`[IntentRouter] "${intent.key}" intent (confidence ${scores[intent.key].confidence.toFixed(2)}) suppressing "${suppressedKey}"`);
+        wants[suppressedKey] = false;
+      }
+    }
+  }
+  return wants;
+}
+
+// ---------------------------------------------------------------------------
+// Context carryover — the local equivalent of a Dialogflow input/output
+// context. If the current message alone doesn't clear the confidence
+// threshold for anything, check whether recent USER turns (bounded by
+// INTENT_ROUTER.CONTEXT_LIFESPAN_TURNS, i.e. a short "context lifespan")
+// would, combined with the current message. This catches short ambiguous
+// follow-ups like "how much is it" after "do you have WIBA cover".
+// ---------------------------------------------------------------------------
+async function tryContextCarryover(message, history) {
+  if (!history || history.length === 0) return null;
+
+  const recentUserTurns = history
+    .filter(m => m.role === 'user')
+    .slice(-INTENT_ROUTER.CONTEXT_LIFESPAN_TURNS)
+    .map(m => m.content)
+    .join(' ');
+
+  if (!recentUserTurns) return null;
+
+  const combinedLowerMsg = `${recentUserTurns} ${message}`.toLowerCase();
+  const combinedScores = await scoreIntents(combinedLowerMsg);
+
+  const winner = INTENTS
+    .map(intent => ({ key: intent.key, confidence: combinedScores[intent.key].confidence }))
+    .filter(s => s.confidence >= INTENT_ROUTER.CONFIDENCE_THRESHOLD)
+    .sort((a, b) => b.confidence - a.confidence)[0];
+
+  if (!winner) return null;
+
+  console.log(`[IntentRouter] no direct match — context carryover from last ${INTENT_ROUTER.CONTEXT_LIFESPAN_TURNS} turn(s) inherited "${winner.key}" (${winner.confidence.toFixed(2)})`);
+  return winner; // { key, confidence }
 }
 
 /**
- * classifyIntent(message)
+ * classifyIntent(message, opts)
  *
- * Returns:
+ * opts:
+ *   history:   array of { role, content } — same shape chatEngine.js
+ *              already holds. Optional; passing it enables context
+ *              carryover for ambiguous follow-ups. Backward compatible:
+ *              omit it and the router behaves like a stateless classifier.
+ *   sessionId: string — forwarded to Dialogflow (if enabled) to scope its
+ *              own session; not required for local-only operation.
+ *
+ * Returns the same shape the original file returned, so chatEngine.js
+ * needs zero changes beyond (optionally) passing { history, sessionId }:
  * {
- *   keywords:         string[]  // extracted, stop-word-filtered search terms
+ *   keywords:         string[]
  *   wantsFAQ:         boolean
  *   wantsProducts:    boolean
  *   wantsBranches:    boolean
  *   wantsCompanyInfo: boolean
  *   wantsClaims:      boolean
- *   cityHint:         string|null  // parsed city, e.g. "near Mombasa" -> "Mombasa"
+ *   cityHint:         string|null
+ *   confidence:       { faq, products, branches, company, claims }  // NEW — for debugging/observability
+ *   source:           'local' | 'local+dialogflow' | 'context'      // NEW
  * }
- *
- * If NOTHING matches (e.g. "hi", "thanks", "tell me more", small talk),
- * we default wantsFAQ + wantsCompanyInfo to true. Those two hold the most
- * general-purpose content, so they're the cheapest, safest fallback for
- * ambiguous input rather than querying every table blindly.
- *
- * Claims are handled as an override, not just another flag: when
- * wantsClaims is true, wantsFAQ and wantsCompanyInfo are forced back to
- * false (even if a FAQ/company keyword also happened to match) so the LLM
- * is grounded in the `claims` table instead of getting mixed/contradicted
- * by generic FAQ or company-knowledge rows. wantsProducts/wantsBranches are
- * left untouched since those are still relevant alongside a claim (e.g.
- * "where's my nearest branch to file a motor claim").
- *
- * NOTE: now async — wantsBranches also checks the message against known
- * branch city/region/keyword tags (cached from the DB), not just the
- * static BRANCH_KEYWORDS list, so "accident in Bungoma" correctly pulls
- * the Bungoma branch even without the word "branch" anywhere in it.
  */
-async function classifyIntent(message) {
+async function classifyIntent(message, opts = {}) {
+  const { history = [], sessionId = null } = opts;
   const lowerMsg = (message || '').toLowerCase();
   const keywords = extractKeywords(message);
 
-  let wantsFAQ = matchesAny(lowerMsg, FAQ_KEYWORDS);
-  let wantsProducts = matchesAny(lowerMsg, PRODUCT_KEYWORDS);
-  let wantsCompanyInfo = matchesAny(lowerMsg, COMPANY_KEYWORDS);
-  const wantsClaims = matchesAny(lowerMsg, CLAIMS_KEYWORDS);
+  // ── Local scoring — always runs, always authoritative ──────────────────
+  let scores = await scoreIntents(lowerMsg);
 
-  // Dynamic product match — catches real product names/keywords the static
-  // PRODUCT_KEYWORDS list doesn't know about yet (e.g. "cic pharmacy").
-  // This is deliberately evaluated even if wantsProducts is already true,
-  // so matchedProductTerm is available below for the company-info override.
-  const productTerms = await getKnownProductTerms();
-  const matchedProductTerm = matchesKnownTerm(lowerMsg, productTerms);
-  if (matchedProductTerm) {
-    wantsProducts = true;
+  // ── Optional Dialogflow boost — never blocks, never throws ─────────────
+  const dfResult = await detectDialogflowIntent(message, sessionId);
+  const { cityHintFromDF } = applyDialogflowBoost(scores, dfResult);
+
+  let wants = {};
+  for (const intent of INTENTS) {
+    wants[intent.key] = scores[intent.key].confidence >= INTENT_ROUTER.CONFIDENCE_THRESHOLD;
   }
 
-  // If the message names a specific known product, the products table is
-  // the authoritative source — don't let a generic word like "about" also
-  // pull in unrelated company_knowledge rows and dilute/contradict the
-  // product-specific answer. Same reasoning as the claims override below.
-  if (matchedProductTerm && wantsCompanyInfo) {
-    console.log(`[IntentRouter] matched known product term "${matchedProductTerm}" — suppressing company intent for this message`);
-    wantsCompanyInfo = false;
-  }
+  wants = applyPrioritySuppression(wants, scores);
 
-  // Dynamic FAQ match — catches curated FAQ keywords the static FAQ_KEYWORDS
-  // list doesn't know about. Needed because the noIntentMatched fallback
-  // below only fires when NOTHING else matched — if the same message also
-  // matches products/company/etc, a specific FAQ tagged with this term
-  // would otherwise never get queried.
-  const faqTerms = await getKnownFAQTerms();
-  const matchedFAQTerm = matchesKnownTerm(lowerMsg, faqTerms);
-  if (matchedFAQTerm) {
-    wantsFAQ = true;
-  }
+  let source = dfResult ? 'local+dialogflow' : 'local';
+  const noneMatched = Object.values(wants).every(v => !v);
 
-  // Claims override — a claims table match takes priority over FAQ/company
-  // knowledge so the AI grounds its answer in the authoritative claims
-  // data instead of general support content that merely mentions "claim".
-  if (wantsClaims) {
-    if (wantsFAQ) {
-      console.log('[IntentRouter] claims intent detected — suppressing faq intent for this message');
+  if (noneMatched) {
+    const inherited = await tryContextCarryover(message, history);
+    if (inherited) {
+      wants[inherited.key] = true;
+      scores[inherited.key].confidence = inherited.confidence;
+      source = 'context';
     }
-    if (wantsCompanyInfo) {
-      console.log('[IntentRouter] claims intent detected — suppressing company intent for this message');
-    }
-    wantsFAQ = false;
-    wantsCompanyInfo = false;
   }
 
-  const branchKeywordHit = matchesAny(lowerMsg, BRANCH_KEYWORDS);
+  // Default Fallback Intent equivalent — FAQ + company are the most
+  // general-purpose content, so they're the cheapest, safest fallback for
+  // ambiguous input ("hi", "thanks", "tell me more") rather than querying
+  // every table blindly.
+  if (Object.values(wants).every(v => !v)) {
+    wants.faq = true;
+    wants.company = true;
+  }
 
-  const locationTerms = await getKnownLocationTerms();
-  const matchedLocation = matchesLocation(lowerMsg, locationTerms);
-
-  let wantsBranches = branchKeywordHit || Boolean(matchedLocation);
-
+  const branchTermMatch = scores.branches.matchedTerm;
   const cityMatch = (message || '').match(/(?:in|at|near|around)\s+(\w+)/i);
-  const cityHint = wantsBranches ? (matchedLocation || (cityMatch ? cityMatch[1] : null)) : null;
+  const cityHint = wants.branches
+    ? (cityHintFromDF || branchTermMatch || (cityMatch ? cityMatch[1] : null))
+    : null;
 
-  const noIntentMatched =
-    !wantsFAQ && !wantsProducts && !wantsBranches && !wantsCompanyInfo && !wantsClaims;
+  console.log(
+    `[IntentRouter/${source}] "${(message || '').substring(0, 60)}" -> ` +
+    `faq:${wants.faq}(${scores.faq.confidence.toFixed(2)}) ` +
+    `products:${wants.products}(${scores.products.confidence.toFixed(2)}) ` +
+    `branches:${wants.branches}(${scores.branches.confidence.toFixed(2)}) ` +
+    `company:${wants.company}(${scores.company.confidence.toFixed(2)}) ` +
+    `claims:${wants.claims}(${scores.claims.confidence.toFixed(2)})`
+  );
 
-  if (noIntentMatched) {
-    wantsFAQ = true;
-    wantsCompanyInfo = true;
-  }
-
-  console.log(`[IntentRouter] "${(message || '').substring(0, 60)}" -> faq:${wantsFAQ} products:${wantsProducts} branches:${wantsBranches} company:${wantsCompanyInfo} claims:${wantsClaims}`);
-
-  return { keywords, wantsFAQ, wantsProducts, wantsBranches, wantsCompanyInfo, wantsClaims, cityHint };
+  return {
+    keywords,
+    wantsFAQ: wants.faq,
+    wantsProducts: wants.products,
+    wantsBranches: wants.branches,
+    wantsCompanyInfo: wants.company,
+    wantsClaims: wants.claims,
+    cityHint,
+    confidence: {
+      faq: scores.faq.confidence,
+      products: scores.products.confidence,
+      branches: scores.branches.confidence,
+      company: scores.company.confidence,
+      claims: scores.claims.confidence,
+    },
+    source,
+  };
 }
 
 module.exports = { classifyIntent };

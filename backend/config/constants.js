@@ -23,14 +23,54 @@ const LLM = {
   DEFAULT_MODEL: process.env.OPENROUTER_MODEL || 'anthropic/claude-3.5-sonnet',
 };
 
-// ── RAG / intent routing caches (IntentRouter.js) ──────────────────────────
+// ── RAG / intent routing caches (utils/intentRouter.js) ─────────────────────
 const RAG_CACHE = {
-  // All three term caches (branch locations, FAQ terms, product terms) use
-  // the same TTL today. Split these out individually if one ever needs to
-  // diverge (e.g. products change more often than branch locations).
+  // All five term caches (branch locations, FAQ terms, product terms,
+  // claims terms, company terms) use the same TTL today. Split these out
+  // individually if one ever needs to diverge (e.g. products change more
+  // often than branch locations).
   LOCATION_TTL_MS: 5 * 60 * 1000,
   FAQ_TERM_TTL_MS: 5 * 60 * 1000,
   PRODUCT_TERM_TTL_MS: 5 * 60 * 1000,
+  CLAIMS_TERM_TTL_MS: 5 * 60 * 1000,
+  COMPANY_TERM_TTL_MS: 5 * 60 * 1000,
+};
+
+// ── Intent classification tuning (utils/intentRouter.js) ───────────────────
+// Dialogflow-inspired scoring: instead of "did any keyword substring
+// appear" (boolean OR), each intent gets a weighted raw score that's
+// squashed into a 0–1 confidence value, gated by CONFIDENCE_THRESHOLD —
+// same default (0.3) Dialogflow ES uses for its Default Fallback Intent.
+const INTENT_ROUTER = {
+  // Below this confidence, an intent is treated as "not requested" even if
+  // one keyword happened to match. Raise this to make routing stricter
+  // (fewer, more confident table hits); lower it to make routing looser.
+  CONFIDENCE_THRESHOLD: 0.3,
+
+  // confidence = raw / (raw + SOFTEN_K). SOFTEN_K=2 means a single strong
+  // hit (raw=2, e.g. one matched multi-word phrase) already clears the
+  // 0.3 threshold, while a lone weak hit (raw=1) sits right at ~0.33 —
+  // matched-but-marginal, which is the intent of a "soft" gate.
+  SOFTEN_K: 2,
+
+  // Training-phrase weighting: a multi-word phrase match ("private motor")
+  // is a stronger signal than a single word ("motor") that could appear
+  // in unrelated context, so it scores higher — approximating what
+  // Dialogflow's ML model gets "for free" from longer training phrases.
+  STATIC_PHRASE_WEIGHT_MULTI: 2,
+  STATIC_PHRASE_WEIGHT_SINGLE: 1,
+
+  // A hit against a live DB keyword/tag column is trusted more than a
+  // hand-maintained static phrase — it's curated per-row against real
+  // catalog/FAQ/claims/company data, so false positives are rarer.
+  DYNAMIC_TERM_WEIGHT: 1.5,
+
+  // Context carryover (Dialogflow "contexts"): how many of the most
+  // recent USER turns are eligible to donate intent to an ambiguous
+  // follow-up message (e.g. "WIBA?" -> "how much is it"). 2 mirrors a
+  // short input-context lifespan — long enough to catch a quick follow-up,
+  // short enough that the bot doesn't stay pinned to a stale topic.
+  CONTEXT_LIFESPAN_TURNS: 2,
 };
 
 // ── RAG result limits (chatEngine.js) ───────────────────────────────────────
@@ -90,6 +130,7 @@ const SESSION = {
 module.exports = {
   LLM,
   RAG_CACHE,
+  INTENT_ROUTER,
   RAG_LIMITS,
   TICKET_PRIORITY,
   RATE_LIMIT,

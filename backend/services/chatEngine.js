@@ -227,7 +227,7 @@ console.log(`🚨 [Escalation check] "${message}" → needsEscalation=${needsEsc
   // and classify intent first, then only hit the tables that are actually
   // relevant. This cuts DB load and reduces irrelevant context being
   // stuffed into the Claude prompt.
-  const intent = await classifyIntent(message);
+  const intent = await classifyIntent(message, { history, sessionId });
 
   console.log(`\n📨 [RAG/${meta.channel || 'web'}] Incoming: "${message.substring(0, 80)}"`);
   console.log(`   keywords      : [${intent.keywords.join(', ') || 'none'}]`);

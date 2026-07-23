@@ -131,6 +131,12 @@ process.on('SIGTERM', () => {
 app.listen(PORT, () => {
   console.log(`         Bima AI Chatbot Backend                        `);
   console.log(`         Server running on port: ${PORT}                `);
+
+  // One-time check, not per-message: confirms Dialogflow credentials/project
+  // are valid and the API is actually reachable, so a misconfiguration is
+  // reported loudly here instead of silently degrading to local-only intent
+  // routing and only surfacing if someone reads every log line.
+  require('./services/dialogflowService').runStartupDiagnostics();
 });
 
 module.exports = app;
