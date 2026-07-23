@@ -1,48 +1,39 @@
 'use client'
 
 import React from 'react'
+import Image from 'next/image'
 import { PRODUCT_ADS, AdTheme } from '@/lib/productAds'
 import { ProductGlyph } from './ProductIllustrations'
 import { ChevronRightIcon } from './UiIcons'
 import { cn } from '@/lib/utils'
 
-// Tailwind needs full class strings at build time, so themes are mapped to
-// pre-written class lists rather than assembled with template strings.
-const THEME_STYLES: Record<AdTheme, { bg: string; blobA: string; blobB: string; badge: string }> = {
+// Each card now shows a real product photo (see /public/product-ads) with a
+// theme-tinted scrim on top so the copy stays legible. Tailwind needs full
+// class strings at build time, so themes are mapped to pre-written class
+// lists rather than assembled with template strings.
+const THEME_STYLES: Record<AdTheme, { scrim: string; badge: string }> = {
   red: {
-    bg: 'bg-gradient-to-br from-cic-red via-cic-red to-cic-red-dark',
-    blobA: 'bg-white/15',
-    blobB: 'bg-cic-red-light/40',
+    scrim: 'bg-gradient-to-t from-cic-red-dark/95 via-cic-red-dark/35 to-cic-red-dark/10',
     badge: 'bg-white/20 text-white',
   },
   crimson: {
-    bg: 'bg-gradient-to-br from-cic-red-light via-cic-red to-cic-plum',
-    blobA: 'bg-white/15',
-    blobB: 'bg-cic-plum/40',
+    scrim: 'bg-gradient-to-t from-cic-plum/95 via-cic-red/30 to-cic-red/10',
     badge: 'bg-white/20 text-white',
   },
   plum: {
-    bg: 'bg-gradient-to-br from-cic-plum via-cic-red-dark to-cic-gray',
-    blobA: 'bg-cic-gold/25',
-    blobB: 'bg-white/10',
+    scrim: 'bg-gradient-to-t from-cic-plum/95 via-cic-plum/40 to-cic-plum/10',
     badge: 'bg-white/15 text-white',
   },
   teal: {
-    bg: 'bg-gradient-to-br from-cic-teal via-cic-teal to-cic-teal-dark',
-    blobA: 'bg-white/15',
-    blobB: 'bg-cic-gold/25',
+    scrim: 'bg-gradient-to-t from-cic-teal-dark/95 via-cic-teal-dark/35 to-cic-teal-dark/10',
     badge: 'bg-white/20 text-white',
   },
   gold: {
-    bg: 'bg-gradient-to-br from-cic-gold via-cic-gold-dark to-cic-plum',
-    blobA: 'bg-white/20',
-    blobB: 'bg-cic-red/25',
+    scrim: 'bg-gradient-to-t from-cic-plum/90 via-cic-gold-dark/40 to-cic-gold-dark/10',
     badge: 'bg-white/25 text-white',
   },
   garnet: {
-    bg: 'bg-gradient-to-br from-cic-red-dark via-cic-plum to-cic-gray',
-    blobA: 'bg-cic-teal/25',
-    blobB: 'bg-white/10',
+    scrim: 'bg-gradient-to-t from-cic-red-dark/95 via-cic-plum/40 to-cic-plum/10',
     badge: 'bg-white/15 text-white',
   },
 }
@@ -137,23 +128,16 @@ export function ProductAdCarousel({ compact, className }: ProductAdCarouselProps
               )}
               style={{ animationDelay: `${i * 60}ms` }}
             >
-              <div className={cn('absolute inset-0', theme.bg)} />
-              {/* Decorative blurred blobs — stand in for a product photo
-                  without depending on external, licensable imagery. */}
-              <div
-                className={cn(
-                  'absolute -right-4 -top-6 w-24 h-24 rounded-full blur-xl opacity-80 animate-float-slow',
-                  theme.blobA
-                )}
-                aria-hidden="true"
+              <Image
+                src={ad.image}
+                alt=""
+                fill
+                sizes="(min-width: 640px) 260px, 78vw"
+                className="object-cover transition-transform duration-500 group-hover:scale-105"
+                priority={i === 0}
               />
-              <div
-                className={cn(
-                  'absolute -bottom-8 -left-6 w-28 h-28 rounded-full blur-xl opacity-70 animate-float-slower',
-                  theme.blobB
-                )}
-                aria-hidden="true"
-              />
+              {/* Theme-tinted scrim so the title/CTA stay legible over the photo. */}
+              <div className={cn('absolute inset-0', theme.scrim)} aria-hidden="true" />
               <div className="absolute inset-0 sheen opacity-0 group-hover:opacity-100 group-hover:animate-shimmer transition-opacity duration-300" aria-hidden="true" />
 
               <div className="relative h-full flex flex-col justify-between p-3.5">

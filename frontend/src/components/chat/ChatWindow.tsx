@@ -22,11 +22,6 @@ const QUICK_QUESTIONS: QuickQuestion[] = [
     id: '2',
     text: 'Haba na Haba CIC',
   },
-  {
-    id: '3',
-    text: 'About  CIC insurance Group.',
-  },
- 
 ]
 
 interface ChatWindowProps {
