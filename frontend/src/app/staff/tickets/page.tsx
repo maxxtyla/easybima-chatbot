@@ -24,8 +24,31 @@ const STATUS_LABELS: Record<TicketStatus, string> = {
   closed: 'Closed',
 };
 
-function formatSlaCountdown(slaDueAt: string | null): { text: string; overdue: boolean } | null {
+const TERMINAL_STATUSES: TicketStatus[] = ['resolved', 'closed'];
+
+// BUG FIX: this previously compared sla_due_at against Date.now()
+// unconditionally, so a resolved/closed ticket's SLA kept ticking up
+// ("Xh Ym overdue") forever after closure — the countdown never stopped
+// just because the ticket did. Once a ticket has reached a terminal
+// status, the SLA clock should freeze at the moment it was actually
+// resolved: compare against resolved_at instead of "now", and report
+// whether the SLA was met or missed rather than a live countdown.
+function formatSlaCountdown(
+  slaDueAt: string | null,
+  status: TicketStatus,
+  resolvedAt: string | null
+): { text: string; overdue: boolean } | null {
   if (!slaDueAt) return null;
+
+  if (TERMINAL_STATUSES.includes(status)) {
+    // No resolved_at on record (shouldn't normally happen once terminal,
+    // but don't show a misleading "overdue" if we can't actually tell) —
+    // just indicate the SLA clock is no longer running.
+    if (!resolvedAt) return { text: 'Closed', overdue: false };
+    const missed = new Date(resolvedAt).getTime() > new Date(slaDueAt).getTime();
+    return { text: missed ? 'SLA missed' : 'SLA met', overdue: false };
+  }
+
   const diffMs = new Date(slaDueAt).getTime() - Date.now();
   const overdue = diffMs <= 0;
   const absMinutes = Math.round(Math.abs(diffMs) / 60000);
@@ -243,7 +266,7 @@ export default function TicketQueuePage() {
               </thead>
               <tbody className="divide-y divide-white/5">
                 {tickets.map((ticket) => {
-                  const sla = formatSlaCountdown(ticket.sla_due_at);
+                  const sla = formatSlaCountdown(ticket.sla_due_at, ticket.status, ticket.resolved_at);
                   const isUnread = unreadTicketIds.has(ticket.id);
                   return (
                     <tr

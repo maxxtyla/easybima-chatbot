@@ -261,6 +261,13 @@ async function getTicketStatus(req, res) {
       // Piggybacks on the existing 4s poll rather than opening a second
       // poll loop just for typing state.
       agentTyping: isTerminal ? false : typingService.isTyping(sessionId, 'agent'),
+      // Timestamp up to which the assigned agent has viewed the customer's
+      // messages (see ticketService.markMessagesRead) — the widget compares
+      // this against each of its own message timestamps to show a "Read"
+      // receipt, the same way agentTyping drives the typing indicator.
+      agentReadAt: ticket?.customer_messages_read_at
+        ? new Date(ticket.customer_messages_read_at).toISOString()
+        : null,
     });
   } catch (error) {
     console.error('Error fetching ticket status:', error);

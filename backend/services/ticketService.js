@@ -220,6 +220,33 @@ async function getTicketMessages(ticketId) {
   return { messages: ticket.transcript_snapshot || [], source: 'snapshot', sessionId: ticket.session_id };
 }
 
+/**
+ * Records that the agent has viewed the customer's messages on this ticket
+ * up to right now — drives the "Read" receipt shown in the customer chat
+ * widget (see chatControllerV2.getTicketStatus, which reports this back as
+ * agentReadAt for the widget to compare against each of its own message
+ * timestamps).
+ *
+ * Called from ticketController.getTicketMessages, i.e. every time the
+ * agent's ticket detail page loads or polls the transcript — matching the
+ * common "read while the conversation is open on screen" semantics used by
+ * most chat products, without needing any explicit "mark as read" click.
+ *
+ * Only writes when there's actually a newer customer/user message than
+ * what's already recorded, so an agent idling on a ticket with nothing new
+ * to read doesn't churn out a write every poll tick for no reason.
+ */
+async function markMessagesRead(ticketId, latestCustomerMessageAt) {
+  if (!latestCustomerMessageAt) return;
+  await pool.query(
+    `UPDATE tickets
+     SET customer_messages_read_at = $2
+     WHERE id = $1
+       AND (customer_messages_read_at IS NULL OR customer_messages_read_at < $2)`,
+    [ticketId, latestCustomerMessageAt]
+  );
+}
+
 async function getTicketEvents(ticketId) {
   const result = await pool.query(
     `SELECT e.*, a.full_name AS actor_name
@@ -811,6 +838,7 @@ module.exports = {
   listTickets,
   getTicketById,
   getTicketMessages,
+  markMessagesRead,
   getTicketEvents,
   updateTicketStatus,
   updateTicketPriority,

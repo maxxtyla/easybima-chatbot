@@ -44,6 +44,7 @@ export function useChat() {
     assignedAgent: null,
     awaitingContactInfo: false,
     agentTyping: false,
+    agentReadAt: null,
   });
 
   const [isSubmittingContact, setIsSubmittingContact] = useState(false);
@@ -87,6 +88,27 @@ export function useChat() {
   const isTypingRef = useRef(false);
   const typingIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const TYPING_IDLE_MS = 3000;
+
+  // Whenever the agent's read receipt (from the ticket-status poll)
+  // advances, flip every customer message sent at or before that point
+  // over to 'read' — this is what shows the double-check under a
+  // customer's bubble once a live agent has actually seen it, separate
+  // from the bot-reply case handled by markUserMessageRead.
+  useEffect(() => {
+    if (!state.agentReadAt) return;
+    const readCutoff = new Date(state.agentReadAt).getTime();
+    setState((prev) => {
+      let changed = false;
+      const messages = prev.messages.map((m) => {
+        if (m.role === 'user' && m.status !== 'read' && m.timestamp <= readCutoff) {
+          changed = true;
+          return { ...m, status: 'read' as const };
+        }
+        return m;
+      });
+      return changed ? { ...prev, messages } : prev;
+    });
+  }, [state.agentReadAt]);
 
   const clearWrapUpTimer = useCallback(() => {
     if (wrapUpTimerRef.current) {
@@ -204,6 +226,7 @@ export function useChat() {
             ticketStatus: (ticket.ticketStatus as ChatState['ticketStatus']) || prev.ticketStatus,
             ticketCreatedAt: ticket.ticketCreatedAt || prev.ticketCreatedAt,
             assignedAgent: ticket.assignedAgent,
+            agentReadAt: ticket.agentReadAt || prev.agentReadAt,
           }));
         }
       } catch {
@@ -230,6 +253,13 @@ export function useChat() {
         // Stamp live-agent replies with whoever is currently assigned, so
         // the bubble can show "Jane" instead of a generic "Live agent" tag.
         ...(role === 'agent' && assignedAgentRef.current?.name ? { agentName: assignedAgentRef.current.name } : {}),
+        // Read-receipt ticks (see MessageBubble) only apply to the
+        // customer's own outgoing messages. Starts at 'sent' — flipped to
+        // 'read' either once the bot responds (plain bot chat) or once the
+        // assigned agent's read receipt catches up to this message's
+        // timestamp (escalated/live-agent chat) — see markUserMessageRead
+        // and the agentReadAt effect below.
+        ...(role === 'user' ? { status: 'sent' as const } : {}),
       };
       setState((prev) => ({ ...prev, messages: [...prev.messages, message] }));
 
@@ -244,6 +274,18 @@ export function useChat() {
     },
     []
   );
+
+  // Flips a single customer message to 'read' — used once the bot has
+  // actually responded to it (see handleSendMessage) rather than firing
+  // for every message regardless of whether anyone's looked at it yet.
+  const markUserMessageRead = useCallback((messageId: string) => {
+    setState((prev) => ({
+      ...prev,
+      messages: prev.messages.map((m) =>
+        m.id === messageId && m.role === 'user' && m.status !== 'read' ? { ...m, status: 'read' } : m
+      ),
+    }));
+  }, []);
 
   // Every new message (either side) pushes the wrap-up prompt back out by
   // WRAP_UP_IDLE_MS. If nothing happens for that long, ask a natural
@@ -332,6 +374,7 @@ export function useChat() {
         ticketCreatedAt: ticket.ticketCreatedAt || prev.ticketCreatedAt,
         assignedAgent: ticket.assignedAgent,
         agentTyping: !!ticket.agentTyping,
+        agentReadAt: ticket.agentReadAt || prev.agentReadAt,
       }));
     } catch {
       // Best-effort — next tick retries
@@ -367,7 +410,7 @@ export function useChat() {
       if (!userMessage.trim() || state.isLoading) return;
 
       stopTyping(state.sessionId);
-      addMessage('user', userMessage, replyTo);
+      const sentMessage = addMessage('user', userMessage, replyTo);
       setState((prev) => ({ ...prev, isLoading: true }));
 
       try {
@@ -464,6 +507,7 @@ export function useChat() {
           }
         } else {
           addMessage('assistant', response.response);
+          markUserMessageRead(sentMessage.id);
           scheduleWrapUpPrompt();
         }
 
@@ -485,7 +529,7 @@ export function useChat() {
         setState((prev) => ({ ...prev, isLoading: false }));
       }
     },
-    [state.sessionId, state.isLoading, addMessage, scheduleWrapUpPrompt, clearWrapUpTimer, stopTyping]
+    [state.sessionId, state.isLoading, addMessage, markUserMessageRead, scheduleWrapUpPrompt, clearWrapUpTimer, stopTyping]
   );
 
   const clearMessages = useCallback(() => {
@@ -505,6 +549,7 @@ export function useChat() {
       ticketStatus: 'open',
       ticketCreatedAt: undefined,
       assignedAgent: null,
+      agentReadAt: null,
     }));
   }, [clearWrapUpTimer]);
 
@@ -540,6 +585,7 @@ export function useChat() {
         ticketStatus: 'open',
         ticketCreatedAt: undefined,
         assignedAgent: null,
+        agentReadAt: null,
       }));
       console.log(`🧹 [SESSION CLEANUP] Local state reset — new sessionId=${newSessionId}`);
     }

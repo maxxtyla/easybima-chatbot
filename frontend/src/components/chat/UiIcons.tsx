@@ -55,6 +55,17 @@ export function CheckIcon({ className }: IconProps) {
   )
 }
 
+/** Two overlapping checks — the "read" half of a sent/read receipt pair,
+ *  rendered next to a single CheckIcon for "sent but not yet read". */
+export function DoubleCheckIcon({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M1 12.5l5 5 10-11" />
+      <path d="M8 12.5l5 5 10-11" />
+    </svg>
+  )
+}
+
 export function XIcon({ className }: IconProps) {
   return (
     <svg {...base} className={className}>

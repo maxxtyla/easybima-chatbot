@@ -40,6 +40,28 @@ async function getTicketMessages(req, res, next) {
     const result = await ticketService.getTicketMessages(req.params.id);
     if (!result) return res.status(404).json({ error: 'Not Found', message: 'Ticket not found.' });
     const { messages, source, sessionId } = result;
+
+    // The agent is looking at this transcript right now (initial load or
+    // the 5s poll) — mark any customer/user messages up to the latest one
+    // as read so the widget can show a "Read" receipt. Fire-and-forget
+    // isn't safe here (we want it committed before responding, but a
+    // failure shouldn't break the transcript fetch itself), so it's
+    // awaited but wrapped so it can't fail the request.
+    const customerTimestamps = messages
+      .filter((m) => m.role === 'user')
+      .map((m) => m.created_at)
+      .filter(Boolean);
+    const latestCustomerMessageAt = customerTimestamps.length
+      ? new Date(Math.max(...customerTimestamps.map((t) => new Date(t).getTime())))
+      : null;
+    if (latestCustomerMessageAt) {
+      try {
+        await ticketService.markMessagesRead(req.params.id, latestCustomerMessageAt);
+      } catch (readError) {
+        console.error('Failed to mark ticket messages as read:', readError);
+      }
+    }
+
     return res.json({
       messages,
       source,

@@ -3,7 +3,7 @@
 import React from 'react'
 import { Message } from '@/types/chat'
 import { MessageContent } from './MessageContent'
-import { ReplyIcon, ThumbsUpIcon, ThumbsDownIcon } from './UiIcons'
+import { ReplyIcon, ThumbsUpIcon, ThumbsDownIcon, CheckIcon, DoubleCheckIcon } from './UiIcons'
 import { formatTime, cn } from '@/lib/utils'
 
 interface MessageBubbleProps {
@@ -105,12 +105,38 @@ export function MessageBubble({ message, onReply, onRate }: MessageBubbleProps) 
         <div className={cn('flex items-center mt-1.5', isBotReply ? 'justify-between' : '')}>
           <span
             className={cn(
-              'text-xs block',
-              isUser ? 'text-red-200 text-right w-full' : isSystem ? 'text-blue-600 text-center w-full' : 'text-neutral-400'
+              'text-xs',
+              isUser ? 'hidden' : isSystem ? 'block text-blue-600 text-center w-full' : 'block text-neutral-400'
             )}
           >
             {formatTime(message.timestamp)}
           </span>
+
+          {/* Timestamp + read receipt grouped and pushed to the right for
+              the customer's own bubbles. Single check once the message has
+              been sent; double check (fading in as it flips) once it's
+              been read — either by the bot responding, or, once
+              escalated, by the assigned agent actually viewing it (see
+              useChat's agentReadAt handling). */}
+          {isUser && (
+            <span className="ml-auto flex items-center gap-1 text-xs text-red-200">
+              {formatTime(message.timestamp)}
+              {message.status && (
+                <span
+                  key={message.status}
+                  className="flex-shrink-0 animate-fade-in"
+                  aria-label={message.status === 'read' ? 'Read' : 'Sent'}
+                  title={message.status === 'read' ? 'Read' : 'Sent'}
+                >
+                  {message.status === 'read' ? (
+                    <DoubleCheckIcon className="w-3.5 h-3.5 text-white" />
+                  ) : (
+                    <CheckIcon className="w-3 h-3" />
+                  )}
+                </span>
+              )}
+            </span>
+          )}
 
           {isBotReply && onRate && (
             <div

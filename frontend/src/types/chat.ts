@@ -23,6 +23,13 @@ export interface Message {
   /** The customer's current 👍/👎 rating on this reply, if any. Only
    *  meaningful for role 'assistant'. undefined = not yet rated. */
   feedback?: 'up' | 'down' | null
+  /** Delivery/read state of the customer's own outgoing message — drives
+   *  the small check-mark receipt under the bubble. Only meaningful for
+   *  role 'user'. 'sent' as soon as it's been accepted by the backend;
+   *  'read' once the bot has responded to it, or (while escalated) once
+   *  the assigned agent's read receipt (see agentReadAt) has caught up to
+   *  this message's timestamp. */
+  status?: 'sending' | 'sent' | 'read'
 }
 
 export interface ChatResponse {
@@ -61,6 +68,12 @@ export interface ChatState {
    *  reported by the ticket-status poll. Drives the typing bubble in
    *  MessageList once a human has taken the conversation over. */
   agentTyping?: boolean
+  /** ISO timestamp up to which the assigned agent has read the customer's
+   *  messages, reported by the ticket-status poll. Any 'user' message with
+   *  a timestamp at or before this is shown as "Read". Null/undefined
+   *  means the agent hasn't viewed the transcript yet (or there's no
+   *  human agent on this ticket at all). */
+  agentReadAt?: string | null
 }
 
 /** Contact details the customer enters in the live-support prompt. Email

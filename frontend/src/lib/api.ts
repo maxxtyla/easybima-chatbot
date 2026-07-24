@@ -86,6 +86,7 @@ export interface TicketStatusResponse {
   ticketCreatedAt: string | null;
   assignedAgent: { id: string; name: string } | null;
   agentTyping?: boolean;
+  agentReadAt?: string | null;
 }
 
 // Reports the customer's typing state so the staff dashboard can show a
