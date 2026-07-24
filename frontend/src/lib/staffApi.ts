@@ -118,8 +118,19 @@ export async function getTicket(id: string): Promise<{ ticket: Ticket }> {
   return staffFetch(`/staff/tickets/${id}`);
 }
 
-export async function getTicketMessages(id: string): Promise<{ messages: TicketMessage[]; source: 'live' | 'snapshot' }> {
+export async function getTicketMessages(id: string): Promise<{ messages: TicketMessage[]; source: 'live' | 'snapshot'; customerTyping?: boolean }> {
   return staffFetch(`/staff/tickets/${id}/messages`);
+}
+
+// Reports the agent's typing state so the customer widget can show a live
+// "agent is typing…" indicator. Fire-and-forget — a missed call just means
+// the indicator lags a beat, never breaks the reply flow itself.
+export async function setTicketTyping(id: string, isTyping: boolean): Promise<void> {
+  try {
+    await staffFetch(`/staff/tickets/${id}/typing`, { method: 'PATCH', body: JSON.stringify({ isTyping }) });
+  } catch {
+    // Best-effort — typing state is inherently ephemeral, not worth retrying
+  }
 }
 
 export async function getTicketEvents(id: string): Promise<{ events: TicketEvent[] }> {

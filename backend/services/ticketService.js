@@ -215,9 +215,9 @@ async function getTicketMessages(ticketId) {
   );
 
   if (liveResult.rows.length > 0) {
-    return { messages: liveResult.rows, source: 'live' };
+    return { messages: liveResult.rows, source: 'live', sessionId: ticket.session_id };
   }
-  return { messages: ticket.transcript_snapshot || [], source: 'snapshot' };
+  return { messages: ticket.transcript_snapshot || [], source: 'snapshot', sessionId: ticket.session_id };
 }
 
 async function getTicketEvents(ticketId) {

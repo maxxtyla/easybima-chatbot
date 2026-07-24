@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Message, ChatState, ReplySnippet, AssignedAgent, ContactInfo } from '@/types/chat';
 import { generateId } from '@/lib/utils';
-import { sendMessage, keepAliveSession, endSession, getConversationHistory, getTicketStatus, closeTicket as closeTicketApi, submitContactInfo as submitContactInfoApi, sendMessageFeedback } from '@/lib/api';
+import { sendMessage, keepAliveSession, endSession, getConversationHistory, getTicketStatus, closeTicket as closeTicketApi, submitContactInfo as submitContactInfoApi, sendMessageFeedback, sendTypingStatus } from '@/lib/api';
 import { playNotificationSound } from '@/lib/notificationSound';
 
 const STORAGE_KEY = 'cic-chat-session';
@@ -43,6 +43,7 @@ export function useChat() {
     ticketCreatedAt: undefined,
     assignedAgent: null,
     awaitingContactInfo: false,
+    agentTyping: false,
   });
 
   const [isSubmittingContact, setIsSubmittingContact] = useState(false);
@@ -80,11 +81,61 @@ export function useChat() {
   // every call site to thread the name through separately.
   const assignedAgentRef = useRef<AssignedAgent | null>(null);
 
+  // Tracks whether we've most recently told the backend the customer IS
+  // typing, so notifyTyping doesn't re-send the same "true" on every
+  // keystroke — only on the transition, plus the idle auto-stop below.
+  const isTypingRef = useRef(false);
+  const typingIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const TYPING_IDLE_MS = 3000;
+
   const clearWrapUpTimer = useCallback(() => {
     if (wrapUpTimerRef.current) {
       clearTimeout(wrapUpTimerRef.current);
       wrapUpTimerRef.current = null;
     }
+  }, []);
+
+  // Called on every keystroke in the input box (only meaningful once a
+  // ticket exists — no agent to notify otherwise, but it's harmless/cheap
+  // to call regardless so InputBar doesn't need to know about escalation
+  // state). Only actually pings the backend on the false→true transition,
+  // then resets a 3s idle timer that reports "stopped typing" if the
+  // customer pauses without sending — the backend's own TTL is a second
+  // safety net if even that never fires (closed tab, etc.).
+  const notifyTyping = useCallback(
+    (sessionId: string) => {
+      if (!sessionId) return;
+      if (typingIdleTimerRef.current) clearTimeout(typingIdleTimerRef.current);
+      if (!isTypingRef.current) {
+        isTypingRef.current = true;
+        sendTypingStatus(sessionId, true);
+      }
+      typingIdleTimerRef.current = setTimeout(() => {
+        isTypingRef.current = false;
+        sendTypingStatus(sessionId, false);
+      }, TYPING_IDLE_MS);
+    },
+    []
+  );
+
+  // Immediately reports "stopped typing" — called right before a message
+  // is actually sent, so the agent's typing bubble doesn't linger for the
+  // full idle window after the customer hits send.
+  const stopTyping = useCallback((sessionId: string) => {
+    if (typingIdleTimerRef.current) {
+      clearTimeout(typingIdleTimerRef.current);
+      typingIdleTimerRef.current = null;
+    }
+    if (isTypingRef.current) {
+      isTypingRef.current = false;
+      sendTypingStatus(sessionId, false);
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (typingIdleTimerRef.current) clearTimeout(typingIdleTimerRef.current);
+    };
   }, []);
 
   // Initialise sessionId from localStorage on mount
@@ -269,6 +320,7 @@ export function useChat() {
         setIsEscalated(false);
         announcedAgentIdRef.current = null;
         waitingAnnouncedRef.current = false;
+        ticket.agentTyping = false;
       }
       lastKnownTicketStatusRef.current = ticket.ticketStatus;
       assignedAgentRef.current = ticket.assignedAgent || null;
@@ -279,6 +331,7 @@ export function useChat() {
         ticketStatus: (ticket.ticketStatus as ChatState['ticketStatus']) || prev.ticketStatus,
         ticketCreatedAt: ticket.ticketCreatedAt || prev.ticketCreatedAt,
         assignedAgent: ticket.assignedAgent,
+        agentTyping: !!ticket.agentTyping,
       }));
     } catch {
       // Best-effort — next tick retries
@@ -313,6 +366,7 @@ export function useChat() {
     async (userMessage: string, replyTo?: ReplySnippet) => {
       if (!userMessage.trim() || state.isLoading) return;
 
+      stopTyping(state.sessionId);
       addMessage('user', userMessage, replyTo);
       setState((prev) => ({ ...prev, isLoading: true }));
 
@@ -431,7 +485,7 @@ export function useChat() {
         setState((prev) => ({ ...prev, isLoading: false }));
       }
     },
-    [state.sessionId, state.isLoading, addMessage, scheduleWrapUpPrompt, clearWrapUpTimer]
+    [state.sessionId, state.isLoading, addMessage, scheduleWrapUpPrompt, clearWrapUpTimer, stopTyping]
   );
 
   const clearMessages = useCallback(() => {
@@ -598,5 +652,6 @@ export function useChat() {
     isSubmittingContact,
     contactError,
     rateMessage,
+    notifyTyping,
   };
 }

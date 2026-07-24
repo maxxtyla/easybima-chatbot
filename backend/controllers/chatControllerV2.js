@@ -13,6 +13,7 @@ const {
   buildErrorResponse,
 } = require('../utils/responseBuilder');
 const { getLatestTicketWithAgent, closeTicketByCustomer, submitCustomerContactInfo } = require('../services/ticketService');
+const typingService = require('../services/typingService');
 const validator = require('validator');
 
 /**
@@ -257,6 +258,9 @@ async function getTicketStatus(req, res) {
       assignedAgent: ticket && ticket.assigned_to
         ? { id: ticket.assigned_to, name: ticket.assigned_agent_name }
         : null,
+      // Piggybacks on the existing 4s poll rather than opening a second
+      // poll loop just for typing state.
+      agentTyping: isTerminal ? false : typingService.isTyping(sessionId, 'agent'),
     });
   } catch (error) {
     console.error('Error fetching ticket status:', error);
@@ -387,4 +391,27 @@ async function submitContactInfo(req, res) {
   }
 }
 
-module.exports = { handleChat, getConversationHistory, keepAliveSession, endSession, getTicketStatus, closeTicket, submitContactInfo };
+/**
+ * POST /api/chat/typing  Body: { sessionId, isTyping }
+ *
+ * Fire-and-forget signal from the customer widget so a staff agent viewing
+ * the ticket sees a live "customer is typing…" indicator. Intentionally
+ * has no session-expiry checks — it's harmless to record typing state for
+ * a session that's about to expire, and adding those checks here would
+ * just slow down what's meant to be a cheap, frequent call.
+ */
+async function setTypingStatus(req, res) {
+  const { sessionId, isTyping } = req.body;
+  try {
+    if (!sessionId) {
+      return res.status(400).json({ error: 'missing_session_id', message: 'sessionId is required' });
+    }
+    typingService.setTyping(sessionId, 'customer', !!isTyping);
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('Error setting typing status:', error);
+    return res.status(500).json(buildErrorResponse(error, sessionId));
+  }
+}
+
+module.exports = { handleChat, getConversationHistory, keepAliveSession, endSession, getTicketStatus, closeTicket, submitContactInfo, setTypingStatus };

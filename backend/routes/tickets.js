@@ -58,4 +58,13 @@ router.patch('/:id/assign', requireRole('supervisor', 'admin'), ticketController
 /** POST /api/staff/tickets/:id/notes  Body: { note } */
 router.post('/:id/notes', ticketController.addNote);
 
+/**
+ * PATCH /api/staff/tickets/:id/typing  Body: { isTyping }
+ * Reports the agent's typing state so the customer widget can show a live
+ * "agent is typing…" indicator. Call on every keystroke (debounced
+ * client-side) with isTyping: true, and once with isTyping: false on send
+ * or when the reply box goes idle.
+ */
+router.patch('/:id/typing', ticketController.setTyping);
+
 module.exports = router;

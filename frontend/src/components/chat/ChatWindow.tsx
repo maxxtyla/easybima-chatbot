@@ -8,6 +8,7 @@ import { InputBar } from './InputBar'
 import { QuickQuestions } from './QuickQuestions'
 import { ConfirmEndChatModal } from './ConfirmEndChatModal'
 import { ContactInfoModal } from './ContactInfoModal'
+import { PolicyDisclaimer } from './PolicyDisclaimer'
 import { HomeTab } from './HomeTab'
 import { TabBar, WidgetTab } from './TabBar'
 import { useChat } from '@/hooks/useChat'
@@ -63,6 +64,9 @@ export function ChatWindow({
     isSubmittingContact,
     contactError,
     rateMessage,
+    sessionId,
+    agentTyping,
+    notifyTyping,
   } = chat
   const showQuickQuestions = messages.length === 0
 
@@ -91,6 +95,23 @@ export function ChatWindow({
     setReplyTo({ id: message.id, role: message.role, content: message.content })
   }
 
+  // Small "by chatting here, you agree…" notice — appears once the
+  // customer's first message goes out, dismissible, and stays dismissed
+  // for the rest of this session (a fresh session, e.g. after "end chat",
+  // will show it again).
+  const DISCLAIMER_STORAGE_PREFIX = 'cic-chat-disclaimer-dismissed:'
+  const [disclaimerDismissed, setDisclaimerDismissed] = React.useState(false)
+  React.useEffect(() => {
+    if (!sessionId) return
+    setDisclaimerDismissed(localStorage.getItem(`${DISCLAIMER_STORAGE_PREFIX}${sessionId}`) === '1')
+  }, [sessionId])
+  const dismissDisclaimer = () => {
+    setDisclaimerDismissed(true)
+    if (sessionId) localStorage.setItem(`${DISCLAIMER_STORAGE_PREFIX}${sessionId}`, '1')
+  }
+  const hasUserMessage = messages.some((m) => m.role === 'user')
+  const showDisclaimer = hasUserMessage && !disclaimerDismissed
+
   const handleSend = (text: string, reply?: ReplySnippet) => {
     handleSendMessage(text, reply)
     setReplyTo(null)
@@ -102,6 +123,7 @@ export function ChatWindow({
         onClose={onRequestClose}
         ticketNumber={ticketNumber}
         assignedAgent={assignedAgent}
+        ticketStatus={ticketStatus}
       />
 
       {activeTab === 'home' ? (
@@ -119,11 +141,26 @@ export function ChatWindow({
             />
           )}
 
-          <MessageList messages={messages} isLoading={isLoading} onReply={handleReply} onRate={rateMessage} />
+          <MessageList
+            messages={messages}
+            isLoading={isLoading}
+            onReply={handleReply}
+            onRate={rateMessage}
+            isAgentTyping={agentTyping}
+            agentTypingName={assignedAgent?.name}
+          />
 
           {showQuickQuestions && <QuickQuestions questions={QUICK_QUESTIONS} onSelect={handleSendMessage} isLoading={isLoading} />}
 
-          <InputBar onSend={handleSend} isLoading={isLoading} replyTo={replyTo} onCancelReply={() => setReplyTo(null)} />
+          {showDisclaimer && <PolicyDisclaimer onDismiss={dismissDisclaimer} />}
+
+          <InputBar
+            onSend={handleSend}
+            isLoading={isLoading}
+            replyTo={replyTo}
+            onCancelReply={() => setReplyTo(null)}
+            onTyping={() => notifyTyping(sessionId)}
+          />
         </>
       )}
 

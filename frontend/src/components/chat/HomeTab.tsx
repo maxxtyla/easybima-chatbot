@@ -8,11 +8,7 @@ import { getWhatsAppChatUrl, SOCIAL_LINKS } from '@/lib/config'
 
 // Small "trusted by real customers" avatar stack shown next to Bima's
 // greeting — faces pulled from CIC's own campaign photography.
-const TRUST_AVATARS = [
-  '/product-ads/avatar-pharmacist.jpg',
-  '/product-ads/avatar-elder.jpg',
-  '/product-ads/avatar-boy.jpg',
-]
+
 
 interface HomeTabProps {
   onStartChat: () => void
@@ -59,25 +55,6 @@ export function HomeTab({ onStartChat, hasActiveConversation }: HomeTabProps) {
             <p className="text-xs text-red-50/90 leading-relaxed mt-1">
               CIC Insurance&apos;s AI assistant. Ask me anything, or jump straight to what you need below.
             </p>
-
-            {/* Trusted-by photo strip -- a quiet nod to real customers without
-                replacing Bima's own avatar. */}
-            <div className="flex items-center gap-2 mt-2.5">
-              <div className="flex -space-x-2">
-                {TRUST_AVATARS.map((src, i) => (
-                  <div
-                    key={src}
-                    className="relative w-6 h-6 rounded-full ring-2 ring-cic-red overflow-hidden"
-                    style={{ zIndex: TRUST_AVATARS.length - i }}
-                  >
-                    <Image src={src} alt="" fill sizes="24px" className="object-cover" />
-                  </div>
-                ))}
-              </div>
-              <span className="text-[10px] font-medium text-white/80">
-                Trusted by thousands of Kenyans
-              </span>
-            </div>
           </div>
         </div>
       </div>

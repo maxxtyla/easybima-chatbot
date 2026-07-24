@@ -11,9 +11,12 @@ interface InputBarProps {
   placeholder?: string
   replyTo?: ReplySnippet | null
   onCancelReply?: () => void
+  /** Called on every keystroke so the parent can report typing state to
+   *  the backend (debounced there — this just forwards raw input events). */
+  onTyping?: () => void
 }
 
-export function InputBar({ onSend, isLoading, placeholder, replyTo, onCancelReply }: InputBarProps) {
+export function InputBar({ onSend, isLoading, placeholder, replyTo, onCancelReply, onTyping }: InputBarProps) {
   const [input, setInput] = React.useState('')
   const inputRef = React.useRef<HTMLInputElement>(null)
 
@@ -45,7 +48,10 @@ export function InputBar({ onSend, isLoading, placeholder, replyTo, onCancelRepl
             ref={inputRef}
             type="text"
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              setInput(e.target.value)
+              onTyping?.()
+            }}
             onKeyDown={handleKeyDown}
             placeholder={replyTo ? 'Type your reply...' : placeholder || 'Type your message...'}
             disabled={isLoading}

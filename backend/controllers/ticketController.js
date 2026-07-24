@@ -1,5 +1,6 @@
 const ticketService = require('../services/ticketService');
 const { sendWhatsAppMessage } = require('../services/whatsappService');
+const typingService = require('../services/typingService');
 
 const VALID_STATUSES = ['open', 'assigned', 'in_progress', 'pending_customer', 'resolved', 'closed'];
 const VALID_PRIORITIES = ['low', 'medium', 'high', 'urgent'];
@@ -38,7 +39,31 @@ async function getTicketMessages(req, res, next) {
   try {
     const result = await ticketService.getTicketMessages(req.params.id);
     if (!result) return res.status(404).json({ error: 'Not Found', message: 'Ticket not found.' });
-    return res.json(result);
+    const { messages, source, sessionId } = result;
+    return res.json({
+      messages,
+      source,
+      // Piggybacks on the existing 5s transcript poll rather than opening
+      // a second poll loop just for typing state.
+      customerTyping: sessionId ? typingService.isTyping(sessionId, 'customer') : false,
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+/**
+ * PATCH /api/staff/tickets/:id/typing  Body: { isTyping }
+ * Fire-and-forget signal from the agent's reply box so the customer widget
+ * can show a live "agent is typing…" indicator.
+ */
+async function setTyping(req, res, next) {
+  try {
+    const { isTyping } = req.body;
+    const ticket = await ticketService.getTicketById(req.params.id);
+    if (!ticket) return res.status(404).json({ error: 'Not Found', message: 'Ticket not found.' });
+    typingService.setTyping(ticket.session_id, 'agent', !!isTyping);
+    return res.json({ success: true });
   } catch (error) {
     return next(error);
   }
@@ -275,4 +300,5 @@ module.exports = {
   addNote,
   sendMessage,
   getMyStats,
+  setTyping,
 };

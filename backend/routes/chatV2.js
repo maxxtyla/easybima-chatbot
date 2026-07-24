@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { handleChat, getConversationHistory, keepAliveSession, endSession, getTicketStatus, closeTicket, submitContactInfo } = require('../controllers/chatControllerV2');
+const { handleChat, getConversationHistory, keepAliveSession, endSession, getTicketStatus, closeTicket, submitContactInfo, setTypingStatus } = require('../controllers/chatControllerV2');
 const { submitFeedback } = require('../controllers/feedbackController');
 const { validateInput } = require('../middleware/validateInput');
 
@@ -132,6 +132,17 @@ router.post('/contact-info', submitContactInfo);
  * }
  */
 router.post('/feedback', submitFeedback);
+
+/**
+ * POST /api/chat/typing
+ * Body: { sessionId: string, isTyping: boolean }
+ *
+ * Reports the customer's typing state so the staff dashboard can show a
+ * live "customer is typing…" indicator. Call on every keystroke (debounced
+ * client-side) with isTyping: true, and once with isTyping: false on send
+ * or when the input goes idle.
+ */
+router.post('/typing', setTypingStatus);
 
 /**
  * GET /api/chat/health

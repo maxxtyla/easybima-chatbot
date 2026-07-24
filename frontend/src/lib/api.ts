@@ -85,6 +85,22 @@ export interface TicketStatusResponse {
   ticketStatus: string | null;
   ticketCreatedAt: string | null;
   assignedAgent: { id: string; name: string } | null;
+  agentTyping?: boolean;
+}
+
+// Reports the customer's typing state so the staff dashboard can show a
+// live "customer is typing…" indicator. Fire-and-forget — a missed call
+// just means the indicator lags a beat, never breaks the chat itself.
+export async function sendTypingStatus(sessionId: string, isTyping: boolean): Promise<void> {
+  try {
+    await fetch(`${API_BASE}/chat/typing`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId, isTyping }),
+    });
+  } catch {
+    // Best-effort — typing state is inherently ephemeral, not worth retrying
+  }
 }
 
 // Lightweight poll used while a ticket is open so the widget picks up

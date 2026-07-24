@@ -12,6 +12,7 @@ import {
   acceptTicket,
   addTicketNote,
   sendTicketMessage,
+  setTicketTyping,
   getMe,
   type Ticket,
   type TicketMessage,
@@ -71,10 +72,71 @@ export default function TicketDetailPage() {
   const [showNewMessageBanner, setShowNewMessageBanner] = useState(false);
   const bannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stopTitleFlashRef = useRef<(() => void) | null>(null);
+  // Transcript auto-scroll: a brand-new message never auto-scrolls — the
+  // agent might be reading back through history — it just surfaces the
+  // "New message" jump button below. The customer-typing indicator is the
+  // one exception: since it's ephemeral and easy to miss, it always pulls
+  // the view down so the agent notices it without needing to scroll
+  // manually. See the two effects below plus the button UI further down.
+  const transcriptRef = useRef<HTMLDivElement>(null);
+  const transcriptBottomRef = useRef<HTMLDivElement>(null);
+  const prevMessageCountRef = useRef(0);
+  const [showJumpToBottom, setShowJumpToBottom] = useState(false);
+
+  const isTranscriptNearBottom = useCallback(() => {
+    const el = transcriptRef.current;
+    if (!el) return true;
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+  }, []);
+
+  const scrollTranscriptToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
+    transcriptBottomRef.current?.scrollIntoView({ behavior, block: 'end' });
+    setShowJumpToBottom(false);
+  }, []);
+  // Live "customer is typing…" flag, sourced from the same transcript poll
+  // below — no separate poll loop needed.
+  const [customerTyping, setCustomerTyping] = useState(false);
+  // Mirrors useChat's notifyTyping/stopTyping pattern on the widget side:
+  // only pings the backend on the false→true transition, then auto-stops
+  // after a short idle window so the indicator doesn't linger once the
+  // agent pauses without sending.
+  const isTypingRef = useRef(false);
+  const typingIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const TYPING_IDLE_MS = 3000;
+
+  const notifyAgentTyping = useCallback(() => {
+    if (!ticketId) return;
+    if (typingIdleTimerRef.current) clearTimeout(typingIdleTimerRef.current);
+    if (!isTypingRef.current) {
+      isTypingRef.current = true;
+      setTicketTyping(ticketId, true);
+    }
+    typingIdleTimerRef.current = setTimeout(() => {
+      isTypingRef.current = false;
+      setTicketTyping(ticketId, false);
+    }, TYPING_IDLE_MS);
+  }, [ticketId]);
+
+  const stopAgentTyping = useCallback(() => {
+    if (typingIdleTimerRef.current) {
+      clearTimeout(typingIdleTimerRef.current);
+      typingIdleTimerRef.current = null;
+    }
+    if (isTypingRef.current) {
+      isTypingRef.current = false;
+      setTicketTyping(ticketId, false);
+    }
+  }, [ticketId]);
+
+  useEffect(() => {
+    return () => {
+      if (typingIdleTimerRef.current) clearTimeout(typingIdleTimerRef.current);
+    };
+  }, []);
 
   const loadTicket = useCallback(async () => {
     try {
-      const [{ ticket }, { messages, source }, { events }] = await Promise.all([
+      const [{ ticket }, { messages, source, customerTyping }, { events }] = await Promise.all([
         getTicket(ticketId),
         getTicketMessages(ticketId),
         getTicketEvents(ticketId),
@@ -83,6 +145,7 @@ export default function TicketDetailPage() {
       setMessages(messages);
       setMessageSource(source);
       setEvents(events);
+      setCustomerTyping(!!customerTyping);
     } catch (err) {
       if ((err as { status?: number }).status === 401) {
         router.push('/staff/login');
@@ -121,10 +184,11 @@ export default function TicketDetailPage() {
     if (!ticket || TERMINAL_STATUSES.includes(ticket.status)) return;
     const interval = setInterval(() => {
       Promise.all([getTicket(ticketId), getTicketMessages(ticketId)])
-        .then(([{ ticket: freshTicket }, { messages, source }]) => {
+        .then(([{ ticket: freshTicket }, { messages, source, customerTyping }]) => {
           setTicket(freshTicket);
           setMessages(messages);
           setMessageSource(source);
+          setCustomerTyping(!!customerTyping);
         })
         .catch(() => {
           // Best-effort — next tick retries, no need to surface transient poll errors
@@ -175,10 +239,36 @@ export default function TicketDetailPage() {
     };
   }, []);
 
+  // A new message landing never auto-scrolls the transcript — the agent
+  // could be reading back through earlier history and an unexpected jump
+  // is disorienting. Instead this just surfaces the "New message" button;
+  // the agent clicks it (or scrolls down themselves) to see it.
+  useEffect(() => {
+    const prevCount = prevMessageCountRef.current;
+    const newCount = messages.length;
+    prevMessageCountRef.current = newCount;
+    if (newCount > prevCount && !isTranscriptNearBottom()) {
+      setShowJumpToBottom(true);
+    }
+  }, [messages, isTranscriptNearBottom]);
+
+  // Unlike new messages, the "customer is typing…" indicator is ephemeral
+  // and easy to miss entirely if the agent has to notice it AND scroll
+  // down before it disappears — so this one does pull the view down on
+  // the false→true transition, regardless of current scroll position.
+  const wasCustomerTypingRef = useRef(false);
+  useEffect(() => {
+    if (customerTyping && !wasCustomerTypingRef.current) {
+      scrollTranscriptToBottom();
+    }
+    wasCustomerTypingRef.current = customerTyping;
+  }, [customerTyping, scrollTranscriptToBottom]);
+
   async function handleSendReply() {
     if (!ticket || !replyText.trim() || isSendingReply) return;
     setIsSendingReply(true);
     setDeliveryWarning(null);
+    stopAgentTyping();
     try {
       const result = await sendTicketMessage(ticket.id, replyText.trim(), replyTo?.id);
       setReplyText('');
@@ -301,7 +391,13 @@ export default function TicketDetailPage() {
               New message from customer
             </div>
           )}
-          <div className="space-y-3 max-h-[60vh] overflow-y-auto">
+          <div
+            ref={transcriptRef}
+            onScroll={() => {
+              if (isTranscriptNearBottom()) setShowJumpToBottom(false);
+            }}
+            className="relative space-y-3 max-h-[60vh] overflow-y-auto"
+          >
             {messages.length === 0 && <p className="text-sm text-neutral-500">No messages available.</p>}
             {messages.map((m, i) => {
               const isUser = m.role === 'user';
@@ -360,7 +456,31 @@ export default function TicketDetailPage() {
                 </div>
               );
             })}
+            {customerTyping && (
+              <div className="flex justify-start">
+                <div className="bg-white/10 rounded-lg px-3 py-2 flex items-center gap-1.5">
+                  <span className="text-xs text-neutral-400 mr-1">Customer is typing</span>
+                  <span className="h-1.5 w-1.5 bg-neutral-400 rounded-full animate-pulse-dot" />
+                  <span className="h-1.5 w-1.5 bg-neutral-400 rounded-full animate-pulse-dot animation-delay-150" />
+                  <span className="h-1.5 w-1.5 bg-neutral-400 rounded-full animate-pulse-dot animation-delay-300" />
+                </div>
+              </div>
+            )}
+            <div ref={transcriptBottomRef} />
           </div>
+
+          {showJumpToBottom && (
+            <button
+              type="button"
+              onClick={() => scrollTranscriptToBottom()}
+              className="mt-2 mx-auto flex items-center gap-1.5 pl-3 pr-2.5 py-1.5 rounded-full bg-cic-red text-white text-xs font-medium shadow-md hover:bg-cic-red-dark transition-colors"
+            >
+              New message
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+          )}
 
           {(() => {
             if (!ticket) return null;
@@ -439,7 +559,10 @@ export default function TicketDetailPage() {
                 <div className="relative flex flex-col gap-2">
                   <textarea
                     value={replyText}
-                    onChange={(e) => setReplyText(e.target.value)}
+                    onChange={(e) => {
+                      setReplyText(e.target.value);
+                      notifyAgentTyping();
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();

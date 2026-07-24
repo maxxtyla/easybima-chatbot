@@ -57,6 +57,10 @@ export interface ChatState {
    *  (or the customer hasn't yet answered) the "how can we reach you?"
    *  contact prompt for it. Drives whether ContactInfoModal is shown. */
   awaitingContactInfo?: boolean
+  /** True while the assigned live agent is currently typing a reply,
+   *  reported by the ticket-status poll. Drives the typing bubble in
+   *  MessageList once a human has taken the conversation over. */
+  agentTyping?: boolean
 }
 
 /** Contact details the customer enters in the live-support prompt. Email

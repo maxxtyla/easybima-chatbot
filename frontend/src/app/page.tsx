@@ -197,7 +197,7 @@ export default function Home() {
               <ul className="space-y-2 text-sm text-neutral-400">
                 <li>
                   <a href="#" className="hover:text-cic-white">
-                    Privacy Policy
+                    Data Privacy Statement
                   </a>
                 </li>
                 <li>

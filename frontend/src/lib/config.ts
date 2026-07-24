@@ -33,3 +33,11 @@ export const SOCIAL_LINKS = {
   youtube: process.env.NEXT_PUBLIC_YOUTUBE_URL || 'https://www.youtube.com/c/CICInsuranceGroupKe',
   instagram: process.env.NEXT_PUBLIC_INSTAGRAM_URL || 'LINK https://www.instagram.com/cicgroupplc',
 }
+
+/**
+ * Linked from the small "by chatting here, you agree…" disclaimer shown
+ * under the widget's first message — see PolicyDisclaimer.tsx. Configure
+ * via env var so this can point at the real CIC privacy policy page
+ * without a code change.
+ */
+export const PRIVACY_POLICY_URL = process.env.NEXT_PUBLIC_PRIVACY_POLICY_URL || 'https://ke.cicinsurancegroup.com/data-privacy-statement/'

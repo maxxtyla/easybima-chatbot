@@ -12,12 +12,19 @@ interface MessageListProps {
   isLoading: boolean
   onReply?: (message: Message) => void
   onRate?: (messageId: string, rating: 'up' | 'down') => void
+  /** True while the live agent handling this ticket is currently typing a
+   *  reply. Renders the same dots bubble as the bot's own isLoading state,
+   *  just sourced from the ticket-status poll instead. */
+  isAgentTyping?: boolean
+  /** Name of the agent who's typing, if known — shown as a label above the
+   *  dots (e.g. "Jane Wanjiru is typing…") instead of a generic bubble. */
+  agentTypingName?: string | null
 }
 
 const NEAR_BOTTOM_THRESHOLD = 100
 const NUDGE_DISTANCE = 120
 
-export function MessageList({ messages, isLoading, onReply, onRate }: MessageListProps) {
+export function MessageList({ messages, isLoading, onReply, onRate, isAgentTyping, agentTypingName }: MessageListProps) {
   const containerRef = React.useRef<HTMLDivElement>(null)
   const bottomRef = React.useRef<HTMLDivElement>(null)
   const prevCountRef = React.useRef(0)
@@ -63,9 +70,9 @@ export function MessageList({ messages, isLoading, onReply, onRate }: MessageLis
 
   React.useEffect(() => {
     const el = containerRef.current
-    if (!el || !isLoading) return
+    if (!el || (!isLoading && !isAgentTyping)) return
     if (isNearBottom()) el.scrollBy({ top: 60, behavior: 'smooth' })
-  }, [isLoading, isNearBottom])
+  }, [isLoading, isAgentTyping, isNearBottom])
 
   const scrollToBottom = () => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
@@ -90,6 +97,16 @@ export function MessageList({ messages, isLoading, onReply, onRate }: MessageLis
           {isLoading && (
             <div className="flex justify-start">
               <div className="bg-cic-white rounded-t-bubble rounded-br-bubble border border-neutral-200 px-3 py-1.5">
+                <TypingIndicator />
+              </div>
+            </div>
+          )}
+          {!isLoading && isAgentTyping && (
+            <div className="flex justify-start">
+              <div className="bg-emerald-50 rounded-t-bubble rounded-br-bubble border border-emerald-200 px-3 py-1.5 flex items-center gap-2">
+                {agentTypingName && (
+                  <span className="text-[11px] font-medium text-emerald-700">{agentTypingName} is typing</span>
+                )}
                 <TypingIndicator />
               </div>
             </div>
