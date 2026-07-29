@@ -7,10 +7,6 @@ import { ProductGlyph } from './ProductIllustrations'
 import { ChevronRightIcon } from './UiIcons'
 import { cn } from '@/lib/utils'
 
-// Each card now shows a real product photo (see /public/product-ads) with a
-// theme-tinted scrim on top so the copy stays legible. Tailwind needs full
-// class strings at build time, so themes are mapped to pre-written class
-// lists rather than assembled with template strings.
 const THEME_STYLES: Record<AdTheme, { scrim: string; badge: string }> = {
   red: {
     scrim: 'bg-gradient-to-t from-cic-red-dark/95 via-cic-red-dark/35 to-cic-red-dark/10',
@@ -73,8 +69,7 @@ export function ProductAdCarousel({ compact, className }: ProductAdCarouselProps
     return () => clearInterval(interval)
   }, [scrollToIndex])
 
-  // Pause autoplay while the person is actively swiping/scrolling, and
-  // resume a few seconds after they let go.
+  // Pause autoplay while user interacts, resume after delay.
   const pause = React.useCallback(() => {
     pausedRef.current = true
     if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current)
@@ -87,7 +82,7 @@ export function ProductAdCarousel({ compact, className }: ProductAdCarouselProps
     }, RESUME_AFTER_MS)
   }, [])
 
-  // Keep the dot indicator in sync when the person swipes manually.
+  // Keep active index updated on scroll.
   const handleScroll = React.useCallback(() => {
     const track = trackRef.current
     if (!track) return
@@ -106,7 +101,7 @@ export function ProductAdCarousel({ compact, className }: ProductAdCarouselProps
         onPointerLeave={scheduleResume}
         onTouchStart={pause}
         onTouchEnd={scheduleResume}
-        className="ad-carousel-track gap-3 px-4 -mx-4 pb-1"
+        className="ad-carousel-track flex overflow-x-auto gap-3 px-4 -mx-4 pb-1 scroll-px-4 scrollbar-none"
         role="list"
         aria-label="CIC Insurance product adverts"
       >
@@ -136,9 +131,13 @@ export function ProductAdCarousel({ compact, className }: ProductAdCarouselProps
                 className="object-cover transition-transform duration-500 group-hover:scale-105"
                 priority={i === 0}
               />
-              {/* Theme-tinted scrim so the title/CTA stay legible over the photo. */}
+
+              {/* Theme-tinted scrim so title/CTA stay legible */}
               <div className={cn('absolute inset-0', theme.scrim)} aria-hidden="true" />
-              <div className="absolute inset-0 sheen opacity-0 group-hover:opacity-100 group-hover:animate-shimmer transition-opacity duration-300" aria-hidden="true" />
+              <div
+                className="absolute inset-0 sheen opacity-0 group-hover:opacity-100 group-hover:animate-shimmer transition-opacity duration-300"
+                aria-hidden="true"
+              />
 
               <div className="relative h-full flex flex-col justify-between p-3.5">
                 <div className="flex items-start justify-between gap-2">
